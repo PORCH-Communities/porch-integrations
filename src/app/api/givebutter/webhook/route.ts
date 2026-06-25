@@ -27,6 +27,8 @@ export async function POST(request: Request) {
   const verification = verifyGivebutterWebhookSecret(request.headers, rawBody);
 
   if (!verification.ok) {
+    const diagnosticHeaders = getWebhookDiagnosticHeaders(request.headers);
+
     console.warn(
       JSON.stringify({
         source: "givebutter-webhook",
@@ -34,6 +36,7 @@ export async function POST(request: Request) {
         mode: "dry_run",
         rejected: true,
         reason: verification.reason,
+        diagnosticHeaders,
       }),
     );
 
@@ -42,6 +45,8 @@ export async function POST(request: Request) {
         ok: false,
         receivedAt,
         error: "Webhook verification failed.",
+        reason: verification.reason,
+        diagnosticHeaders,
       },
       { status: verification.reason === "missing_config" ? 500 : 401 },
     );
@@ -131,4 +136,18 @@ export async function POST(request: Request) {
     mode: "dry_run",
     ignored: true,
   });
+}
+
+function getWebhookDiagnosticHeaders(headers: Headers) {
+  return [...headers.keys()]
+    .filter((key) => {
+      const normalized = key.toLowerCase();
+
+      return (
+        normalized.includes("givebutter") ||
+        normalized.includes("signature") ||
+        normalized.includes("webhook")
+      );
+    })
+    .sort();
 }
