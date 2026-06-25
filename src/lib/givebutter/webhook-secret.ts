@@ -42,6 +42,14 @@ export function verifyGivebutterWebhookSecret(
     return { ok: false, reason: "missing_signature" };
   }
 
+  const matchesSharedSecretSignature = signatures.some((signature) =>
+    secureEqual(signature, configuredSecret),
+  );
+
+  if (matchesSharedSecretSignature) {
+    return { ok: true, method: "shared_secret" };
+  }
+
   const expectedSignatures = getSecretKeyCandidates(configuredSecret).flatMap((secretKey) => [
     hmac(rawBody, secretKey, "sha256", "hex"),
     `sha256=${hmac(rawBody, secretKey, "sha256", "hex")}`,
