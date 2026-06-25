@@ -4,6 +4,8 @@ import {
   mapGivebutterCampaign,
   mapGivebutterDonation,
   parseGivebutterWebhookPayload,
+  summarizeGivebutterCampaignPayload,
+  summarizeGivebutterDonationPayload,
 } from "@/lib/givebutter/payloads";
 import { verifyGivebutterWebhookSecret } from "@/lib/givebutter/webhook-secret";
 
@@ -60,7 +62,7 @@ export async function POST(request: Request) {
   const event = payload.event ?? "unknown";
 
   if (event === "transaction.succeeded") {
-    const donation = mapGivebutterDonation(payload);
+    const summary = summarizeGivebutterDonationPayload(mapGivebutterDonation(payload), payload);
 
     console.log(
       JSON.stringify({
@@ -69,9 +71,7 @@ export async function POST(request: Request) {
         mode: "dry_run",
         event,
         verifiedBy: verification.method,
-        transactionId: donation.transactionId,
-        transactionNumber: donation.transactionNumber,
-        campaignCode: donation.campaignCode,
+        summary,
       }),
     );
 
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
   }
 
   if (event === "campaign.created" || event === "campaign.updated") {
-    const campaign = mapGivebutterCampaign(payload);
+    const summary = summarizeGivebutterCampaignPayload(mapGivebutterCampaign(payload), payload);
 
     console.log(
       JSON.stringify({
@@ -93,8 +93,7 @@ export async function POST(request: Request) {
         mode: "dry_run",
         event,
         verifiedBy: verification.method,
-        campaignId: campaign.campaignId,
-        campaignCode: campaign.campaignCode,
+        summary,
       }),
     );
 

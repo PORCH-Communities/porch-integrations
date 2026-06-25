@@ -57,6 +57,13 @@ export type GivebutterCampaign = {
   campaignTitle: string | null;
 };
 
+export type GivebutterPayloadSummary = {
+  topLevelKeys: string[];
+  dataKeys: string[];
+  present: Record<string, boolean>;
+  missingRecommended: string[];
+};
+
 export function parseGivebutterWebhookPayload(rawBody: string): GivebutterWebhookPayload | null {
   try {
     const parsed = JSON.parse(rawBody) as unknown;
@@ -149,6 +156,58 @@ export function getFallbackEmail(donation: GivebutterDonation): string | null {
   return `${donation.contactId}@porchcommunities.org`;
 }
 
+export function summarizeGivebutterDonationPayload(
+  donation: GivebutterDonation,
+  payload: GivebutterWebhookPayload,
+): GivebutterPayloadSummary {
+  const present = {
+    eventId: hasValue(donation.eventId),
+    transactionId: hasValue(donation.transactionId),
+    transactionNumber: hasValue(donation.transactionNumber),
+    contactId: hasValue(donation.contactId),
+    email: hasValue(donation.email),
+    donorName: hasValue(donation.firstName) || hasValue(donation.lastName),
+    amount: hasValue(donation.amount),
+    campaignId: hasValue(donation.campaignId),
+    campaignCode: hasValue(donation.campaignCode),
+    campaignTitle: hasValue(donation.campaignTitle),
+    transactedAt: hasValue(donation.transactedAt),
+    address: hasValue(donation.address.line1) || hasValue(donation.address.postalCode),
+    utm: Object.values(donation.utm).some(hasValue),
+    dedication: Object.values(donation.dedication).some(hasValue),
+  };
+
+  return {
+    ...summarizePayloadKeys(payload),
+    present,
+    missingRecommended: missingKeys(present, [
+      "transactionId",
+      "transactionNumber",
+      "amount",
+      "campaignCode",
+      "transactedAt",
+    ]),
+  };
+}
+
+export function summarizeGivebutterCampaignPayload(
+  campaign: GivebutterCampaign,
+  payload: GivebutterWebhookPayload,
+): GivebutterPayloadSummary {
+  const present = {
+    eventId: hasValue(campaign.eventId),
+    campaignId: hasValue(campaign.campaignId),
+    campaignCode: hasValue(campaign.campaignCode),
+    campaignTitle: hasValue(campaign.campaignTitle),
+  };
+
+  return {
+    ...summarizePayloadKeys(payload),
+    present,
+    missingRecommended: missingKeys(present, ["campaignId", "campaignCode", "campaignTitle"]),
+  };
+}
+
 function asRecord(value: unknown): JsonRecord | null {
   return isRecord(value) ? value : null;
 }
@@ -189,4 +248,21 @@ function firstId(...values: unknown[]): string | number | null {
   }
 
   return null;
+}
+
+function summarizePayloadKeys(payload: GivebutterWebhookPayload) {
+  const data = asRecord(payload.data);
+
+  return {
+    topLevelKeys: Object.keys(payload).sort(),
+    dataKeys: data ? Object.keys(data).sort() : [],
+  };
+}
+
+function hasValue(value: unknown): boolean {
+  return value !== null && value !== undefined && value !== "";
+}
+
+function missingKeys(present: Record<string, boolean>, requiredKeys: string[]): string[] {
+  return requiredKeys.filter((key) => !present[key]);
 }
