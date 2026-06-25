@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 const SIGNATURE_HEADERS = [
+  "signature",
   "x-givebutter-signature",
   "givebutter-signature",
   "x-givebutter-webhook-signature",
