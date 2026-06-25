@@ -15,7 +15,7 @@ type PersistedPayloadLog =
     }
   | {
       ok: false;
-      reason: "disabled" | "missing_blob_token" | "persist_failed";
+      reason: "disabled" | "missing_blob_token" | "persist_failed" | "persist_timeout";
     };
 
 export async function persistPayloadLog(input: PersistPayloadLogInput): Promise<PersistedPayloadLog> {
@@ -36,17 +36,24 @@ export async function persistPayloadLog(input: PersistPayloadLogInput): Promise<
       summary: input.summary,
       payload: JSON.parse(input.rawBody),
     });
-    const blob = await put(pathname, body, {
-      access: "private",
-      contentType: "application/json",
-    });
+    const blob = await withTimeout(
+      put(pathname, body, {
+        access: "private",
+        contentType: "application/json",
+      }),
+      5000,
+    );
 
     return {
       ok: true,
       pathname,
       url: blob.url,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === "persist_timeout") {
+      return { ok: false, reason: "persist_timeout" };
+    }
+
     return { ok: false, reason: "persist_failed" };
   }
 }
@@ -57,4 +64,27 @@ function buildPayloadLogPath(receivedAt: string): string {
   const nonce = crypto.randomUUID();
 
   return `givebutter-payload-logs/${date}/${safeTimestamp}-${nonce}.json`;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("persist_timeout")), timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    if (error instanceof Error && error.message === "persist_timeout") {
+      throw error;
+    }
+
+    throw new Error("persist_failed");
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }
