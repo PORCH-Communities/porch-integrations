@@ -7,8 +7,7 @@ import {
   summarizeGivebutterCampaignPayload,
   summarizeGivebutterDonationPayload,
 } from "@/lib/givebutter/payloads";
-import { encryptPayloadForLog } from "@/lib/encrypted-payload-log";
-import { persistEncryptedPayloadLog } from "@/lib/persisted-payload-log";
+import { persistPayloadLog } from "@/lib/persisted-payload-log";
 import { verifyGivebutterWebhookSecret } from "@/lib/givebutter/webhook-secret";
 
 export const runtime = "nodejs";
@@ -65,11 +64,10 @@ export async function POST(request: Request) {
 
   if (event === "transaction.succeeded") {
     const summary = summarizeGivebutterDonationPayload(mapGivebutterDonation(payload), payload);
-    const encryptedPayload = encryptPayloadForLog(rawBody);
-    const persistedPayload = await persistEncryptedPayloadLog({
+    const persistedPayload = await persistPayloadLog({
       receivedAt,
       event,
-      encryptedPayload,
+      rawBody,
       summary,
     });
 
@@ -81,7 +79,6 @@ export async function POST(request: Request) {
         event,
         verifiedBy: verification.method,
         summary,
-        encryptedPayload,
         persistedPayload,
       }),
     );

@@ -3,7 +3,7 @@ import { put } from "@vercel/blob";
 type PersistPayloadLogInput = {
   receivedAt: string;
   event: string;
-  encryptedPayload: unknown;
+  rawBody: string;
   summary: unknown;
 };
 
@@ -15,18 +15,12 @@ type PersistedPayloadLog =
     }
   | {
       ok: false;
-      reason: "disabled" | "not_encrypted" | "missing_blob_token" | "persist_failed";
+      reason: "disabled" | "missing_blob_token" | "persist_failed";
     };
 
-export async function persistEncryptedPayloadLog(
-  input: PersistPayloadLogInput,
-): Promise<PersistedPayloadLog> {
+export async function persistPayloadLog(input: PersistPayloadLogInput): Promise<PersistedPayloadLog> {
   if (process.env.ENABLE_PERSISTED_GIVEBUTTER_PAYLOAD_LOG !== "true") {
     return { ok: false, reason: "disabled" };
-  }
-
-  if (!isEncryptedPayload(input.encryptedPayload)) {
-    return { ok: false, reason: "not_encrypted" };
   }
 
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
@@ -36,11 +30,11 @@ export async function persistEncryptedPayloadLog(
   try {
     const pathname = buildPayloadLogPath(input.receivedAt);
     const body = JSON.stringify({
-      source: "givebutter-webhook-encrypted-payload",
+      source: "givebutter-webhook-payload",
       receivedAt: input.receivedAt,
       event: input.event,
       summary: input.summary,
-      encryptedPayload: input.encryptedPayload,
+      payload: JSON.parse(input.rawBody),
     });
     const blob = await put(pathname, body, {
       access: "private",
@@ -63,14 +57,4 @@ function buildPayloadLogPath(receivedAt: string): string {
   const nonce = crypto.randomUUID();
 
   return `givebutter-payload-logs/${date}/${safeTimestamp}-${nonce}.json`;
-}
-
-function isEncryptedPayload(value: unknown): boolean {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      "ok" in value &&
-      value.ok === true &&
-      "ciphertext" in value,
-  );
 }
