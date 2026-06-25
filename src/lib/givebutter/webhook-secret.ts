@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, type BinaryLike, timingSafeEqual } from "node:crypto";
 
 const SIGNATURE_HEADERS = [
   "signature",
@@ -42,13 +42,14 @@ export function verifyGivebutterWebhookSecret(
     return { ok: false, reason: "missing_signature" };
   }
 
-  const expectedSignatures = [
-    hmac(rawBody, configuredSecret, "sha256", "hex"),
-    `sha256=${hmac(rawBody, configuredSecret, "sha256", "hex")}`,
-    hmac(rawBody, configuredSecret, "sha256", "base64"),
-    hmac(rawBody, configuredSecret, "sha1", "hex"),
-    `sha1=${hmac(rawBody, configuredSecret, "sha1", "hex")}`,
-  ];
+  const expectedSignatures = getSecretKeyCandidates(configuredSecret).flatMap((secretKey) => [
+    hmac(rawBody, secretKey, "sha256", "hex"),
+    `sha256=${hmac(rawBody, secretKey, "sha256", "hex")}`,
+    hmac(rawBody, secretKey, "sha256", "base64"),
+    `sha256=${hmac(rawBody, secretKey, "sha256", "base64")}`,
+    hmac(rawBody, secretKey, "sha1", "hex"),
+    `sha1=${hmac(rawBody, secretKey, "sha1", "hex")}`,
+  ]);
 
   const matchesSignature = signatures.some((signature) =>
     expectedSignatures.some((expected) => secureEqual(signature, expected)),
@@ -86,11 +87,38 @@ function extractSignatureValues(headerValue: string | null): string[] {
 
 function hmac(
   rawBody: string,
-  secret: string,
+  secret: BinaryLike,
   algorithm: "sha1" | "sha256",
   encoding: "base64" | "hex",
 ): string {
   return createHmac(algorithm, secret).update(rawBody, "utf8").digest(encoding);
+}
+
+function getSecretKeyCandidates(secret: string): BinaryLike[] {
+  const candidates: BinaryLike[] = [secret];
+  const decodedSecret = decodeBase64Secret(secret);
+
+  if (decodedSecret) {
+    candidates.push(decodedSecret);
+  }
+
+  return candidates;
+}
+
+function decodeBase64Secret(secret: string): Buffer | null {
+  const normalizedSecret = secret.trim().replace(/-/g, "+").replace(/_/g, "/");
+  const paddedSecret = normalizedSecret.padEnd(
+    normalizedSecret.length + ((4 - (normalizedSecret.length % 4)) % 4),
+    "=",
+  );
+
+  try {
+    const decoded = Buffer.from(paddedSecret, "base64");
+
+    return decoded.length > 0 ? decoded : null;
+  } catch {
+    return null;
+  }
 }
 
 function secureEqual(left: string, right: string): boolean {
