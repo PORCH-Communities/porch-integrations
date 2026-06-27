@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { createHubSpotClient, HubSpotApiError } from "@/lib/hubspot/client";
-import { confirmContactHousehold } from "@/lib/hubspot/household-confirmation";
+import {
+  associateGivebutterDealToHousehold,
+  processHouseholdStatusChange,
+} from "@/lib/hubspot/household-confirmation";
 import { getHubSpotRequestUri, verifyHubSpotV3Signature } from "@/lib/hubspot/signature";
 
 export const runtime = "nodejs";
@@ -13,13 +16,22 @@ type HubSpotWebhookEvent = {
   propertyName?: string;
   propertyValue?: string;
   subscriptionType?: string;
+  associationRemoved?: boolean;
+  associationType?: string;
+  fromObjectId?: number | string;
+  fromObjectTypeId?: string;
+  toObjectTypeId?: string;
 };
 
 export async function GET() {
   return NextResponse.json({
     ok: true,
     endpoint: "/api/hubspot/webhook",
-    subscription: "contact.household_match_status property changes",
+    subscriptions: [
+      "contact.household_match_status property changes",
+      "deal creation",
+      "deal-to-contact association additions",
+    ],
   });
 }
 
@@ -60,22 +72,35 @@ export async function POST(request: Request) {
   const contactIds = [
     ...new Set(
       events
-        .filter(isConfirmedHouseholdEvent)
+        .filter(isHouseholdStatusEvent)
         .map((event) => String(event.objectId))
         .filter(Boolean),
     ),
   ];
+  const dealIds = [
+    ...new Set(
+      events
+        .filter(isActionableDealEvent)
+        .map(getDealId)
+        .filter((dealId): dealId is string => Boolean(dealId)),
+    ),
+  ];
 
-  if (contactIds.length === 0) {
+  if (contactIds.length === 0 && dealIds.length === 0) {
     return NextResponse.json({ ok: true, receivedAt, received: events.length, ignored: true });
   }
 
   try {
     const client = createHubSpotClient();
-    const results = [];
+    const contactResults = [];
+    const dealResults = [];
 
     for (const contactId of contactIds) {
-      results.push(await confirmContactHousehold(client, contactId));
+      contactResults.push(await processHouseholdStatusChange(client, contactId));
+    }
+
+    for (const dealId of dealIds) {
+      dealResults.push(await associateGivebutterDealToHousehold(client, dealId));
     }
 
     console.log(
@@ -83,8 +108,9 @@ export async function POST(request: Request) {
         source: "hubspot-webhook",
         receivedAt,
         received: events.length,
-        processed: results.length,
-        results,
+        processed: contactResults.length + dealResults.length,
+        contactResults,
+        dealResults,
       }),
     );
 
@@ -92,8 +118,9 @@ export async function POST(request: Request) {
       ok: true,
       receivedAt,
       received: events.length,
-      processed: results.length,
-      results,
+      processed: contactResults.length + dealResults.length,
+      contactResults,
+      dealResults,
     });
   } catch (error) {
     const retryable = error instanceof HubSpotApiError ? error.retryable : true;
@@ -125,13 +152,40 @@ function parseWebhookEvents(rawBody: string): HubSpotWebhookEvent[] | null {
   }
 }
 
-function isConfirmedHouseholdEvent(event: HubSpotWebhookEvent): boolean {
+function isHouseholdStatusEvent(event: HubSpotWebhookEvent): boolean {
   return (
     event.objectId !== undefined &&
     event.objectTypeId === "0-1" &&
     event.propertyName === "household_match_status" &&
-    event.propertyValue === "confirmed" &&
     (event.subscriptionType === "object.propertyChange" ||
       event.subscriptionType === "contact.propertyChange")
   );
+}
+
+function isActionableDealEvent(event: HubSpotWebhookEvent): boolean {
+  const isCreation =
+    event.objectId !== undefined &&
+    event.objectTypeId === "0-3" &&
+    (event.subscriptionType === "object.creation" ||
+      event.subscriptionType === "deal.creation");
+  const isContactAssociationAdded =
+    (event.subscriptionType === "object.associationChange" ||
+      event.subscriptionType === "deal.associationChange") &&
+    event.associationRemoved === false &&
+    event.associationType === "DEAL_TO_CONTACT" &&
+    (event.fromObjectTypeId === undefined || event.fromObjectTypeId === "0-3") &&
+    (event.toObjectTypeId === undefined || event.toObjectTypeId === "0-1") &&
+    event.fromObjectId !== undefined;
+
+  return isCreation || isContactAssociationAdded;
+}
+
+function getDealId(event: HubSpotWebhookEvent): string | null {
+  const value =
+    event.subscriptionType === "object.associationChange" ||
+    event.subscriptionType === "deal.associationChange"
+      ? event.fromObjectId
+      : event.objectId;
+
+  return value === undefined ? null : String(value);
 }

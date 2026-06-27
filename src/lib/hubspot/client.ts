@@ -7,6 +7,7 @@ export type HubSpotContact = {
     suggested_household_match?: string | null;
   };
   associations?: {
+    companies?: { results?: Array<{ id: string }> };
     deals?: { results?: Array<{ id: string }> };
   };
 };
@@ -22,14 +23,21 @@ export type HubSpotCompany = {
 export type HubSpotDeal = {
   id: string;
   properties: {
+    givebutter_reference_number?: string | null;
     pipeline?: string | null;
+  };
+  associations?: {
+    companies?: { results?: Array<{ id: string }> };
+    contacts?: { results?: Array<{ id: string }> };
   };
 };
 
 export type HubSpotClient = {
   getContact(contactId: string): Promise<HubSpotContact>;
   getCompany(companyId: string): Promise<HubSpotCompany>;
+  getDeal(dealId: string): Promise<HubSpotDeal>;
   getDeals(dealIds: string[]): Promise<HubSpotDeal[]>;
+  updateContactProperties(contactId: string, properties: Record<string, string>): Promise<void>;
   associateContactToCompany(contactId: string, companyId: string): Promise<void>;
   associateDealToCompany(dealId: string, companyId: string): Promise<void>;
 };
@@ -86,13 +94,21 @@ export function createHubSpotClient(input?: {
       const properties = "household_match_status,suggested_household_match";
 
       return request<HubSpotContact>(
-        `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=${properties}&associations=deals`,
+        `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=${properties}&associations=companies,deals`,
       );
     },
 
     getCompany(companyId) {
       return request<HubSpotCompany>(
         `/crm/v3/objects/companies/${encodeURIComponent(companyId)}?properties=name,record_type`,
+      );
+    },
+
+    getDeal(dealId) {
+      const properties = "pipeline,givebutter_reference_number";
+
+      return request<HubSpotDeal>(
+        `/crm/v3/objects/deals/${encodeURIComponent(dealId)}?properties=${properties}&associations=companies,contacts`,
       );
     },
 
@@ -113,6 +129,13 @@ export function createHubSpotClient(input?: {
       );
 
       return response.results ?? [];
+    },
+
+    async updateContactProperties(contactId, properties) {
+      await request(`/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ properties }),
+      });
     },
 
     async associateContactToCompany(contactId, companyId) {

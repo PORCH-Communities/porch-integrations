@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  associateGivebutterDealToHousehold,
   confirmContactHousehold,
   parseSuggestedHouseholdCompanyId,
+  processHouseholdStatusChange,
 } from "./household-confirmation.ts";
 
 test("associates a confirmed contact and only Individual Donations deals", async () => {
@@ -133,4 +135,196 @@ test("parses the leading HubSpot company ID from the suggested match", () => {
   );
   assert.equal(parseSuggestedHouseholdCompanyId("Baxley Household"), null);
   assert.equal(parseSuggestedHouseholdCompanyId(null), null);
+});
+
+test("uses one staff-associated Household when a confirmed contact has no suggestion", async () => {
+  const calls = [];
+  const client = {
+    async getContact(id) {
+      return {
+        id,
+        properties: { household_match_status: "confirmed" },
+        associations: {
+          companies: { results: [{ id: "business" }, { id: "new-household" }] },
+        },
+      };
+    },
+    async getCompany(id) {
+      return {
+        id,
+        properties: { record_type: id === "new-household" ? "household" : "organization" },
+      };
+    },
+    async getDeals() {
+      return [];
+    },
+    async associateContactToCompany(contactId, companyId) {
+      calls.push(["associateContactToCompany", contactId, companyId]);
+    },
+    async associateDealToCompany() {},
+  };
+
+  assert.deepEqual(await confirmContactHousehold(client, "contact-new"), {
+    status: "associated",
+    contactId: "contact-new",
+    companyId: "new-household",
+    associatedDealIds: [],
+  });
+  assert.deepEqual(calls, [["associateContactToCompany", "contact-new", "new-household"]]);
+});
+
+test("stops when a contact is associated with multiple Households", async () => {
+  const client = {
+    async getContact(id) {
+      return {
+        id,
+        properties: { household_match_status: "confirmed" },
+        associations: {
+          companies: { results: [{ id: "household-1" }, { id: "household-2" }] },
+        },
+      };
+    },
+    async getCompany(id) {
+      return { id, properties: { record_type: "household" } };
+    },
+    async getDeals() {
+      throw new Error("should not be called");
+    },
+    async associateContactToCompany() {
+      throw new Error("should not be called");
+    },
+    async associateDealToCompany() {
+      throw new Error("should not be called");
+    },
+  };
+
+  assert.deepEqual(await confirmContactHousehold(client, "contact-ambiguous"), {
+    status: "needs_attention",
+    contactId: "contact-ambiguous",
+    reason: "Contact is associated with multiple Household companies.",
+  });
+});
+
+test("clears stale review fields when the current status is No Match", async () => {
+  const updates = [];
+  const client = {
+    async getContact(id) {
+      return { id, properties: { household_match_status: "no_match" } };
+    },
+    async updateContactProperties(id, properties) {
+      updates.push([id, properties]);
+    },
+  };
+
+  assert.deepEqual(await processHouseholdStatusChange(client, "contact-no-match"), {
+    status: "review_fields_cleared",
+    contactId: "contact-no-match",
+  });
+  assert.deepEqual(updates, [
+    [
+      "contact-no-match",
+      { suggested_household_match: "", household_match_score: "" },
+    ],
+  ]);
+});
+
+test("associates a Givebutter donation deal to a confirmed contact's Household", async () => {
+  const associations = [];
+  const client = {
+    async getDeal(id) {
+      return {
+        id,
+        properties: {
+          pipeline: "155504019",
+          givebutter_reference_number: "123456",
+        },
+        associations: { contacts: { results: [{ id: "contact-1" }] } },
+      };
+    },
+    async getContact(id) {
+      return {
+        id,
+        properties: { household_match_status: "confirmed" },
+        associations: { companies: { results: [{ id: "household-1" }] } },
+      };
+    },
+    async getCompany(id) {
+      return { id, properties: { record_type: "household" } };
+    },
+    async associateDealToCompany(dealId, companyId) {
+      associations.push([dealId, companyId]);
+    },
+  };
+
+  assert.deepEqual(await associateGivebutterDealToHousehold(client, "deal-1"), {
+    status: "associated",
+    dealId: "deal-1",
+    companyId: "household-1",
+  });
+  assert.deepEqual(associations, [["deal-1", "household-1"]]);
+});
+
+test("ignores non-Givebutter and non-donation deals", async () => {
+  const makeClient = (properties) => ({
+    async getDeal(id) {
+      return { id, properties, associations: { contacts: { results: [{ id: "contact-1" }] } } };
+    },
+  });
+
+  assert.deepEqual(
+    await associateGivebutterDealToHousehold(
+      makeClient({ pipeline: "155504019", givebutter_reference_number: null }),
+      "deal-no-reference",
+    ),
+    {
+      status: "ignored",
+      dealId: "deal-no-reference",
+      reason: "Deal has no Givebutter reference number.",
+    },
+  );
+  assert.deepEqual(
+    await associateGivebutterDealToHousehold(
+      makeClient({ pipeline: "another-pipeline", givebutter_reference_number: "123" }),
+      "deal-wrong-pipeline",
+    ),
+    {
+      status: "ignored",
+      dealId: "deal-wrong-pipeline",
+      reason: "Deal is not in the Individual Donations pipeline.",
+    },
+  );
+});
+
+test("does not recreate an existing household deal association", async () => {
+  const client = {
+    async getDeal(id) {
+      return {
+        id,
+        properties: { pipeline: "155504019", givebutter_reference_number: "123" },
+        associations: {
+          contacts: { results: [{ id: "contact-1" }] },
+          companies: { results: [{ id: "household-1" }] },
+        },
+      };
+    },
+    async getContact(id) {
+      return {
+        id,
+        properties: { household_match_status: "auto_householded" },
+        associations: { companies: { results: [{ id: "household-1" }] } },
+      };
+    },
+    async getCompany(id) {
+      return { id, properties: { record_type: "household" } };
+    },
+    async associateDealToCompany() {
+      throw new Error("should not be called");
+    },
+  };
+
+  assert.deepEqual(await associateGivebutterDealToHousehold(client, "deal-existing"), {
+    status: "already_associated",
+    dealId: "deal-existing",
+    companyId: "household-1",
+  });
 });
