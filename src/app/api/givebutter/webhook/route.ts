@@ -7,16 +7,23 @@ import {
   summarizeGivebutterCampaignPayload,
   summarizeGivebutterDonationPayload,
 } from "@/lib/givebutter/payloads";
+import { createHubSpotClient, HubSpotApiError } from "@/lib/hubspot/client";
+import {
+  getDonationParityMode,
+  processGivebutterDonation,
+} from "@/lib/hubspot/donation-parity";
 import { persistPayloadLog } from "@/lib/persisted-payload-log";
 import { verifyGivebutterWebhookSecret } from "@/lib/givebutter/webhook-secret";
 
 export const runtime = "nodejs";
 
 export async function GET() {
+  const mode = getDonationParityMode();
+
   return NextResponse.json({
     ok: true,
     endpoint: "/api/givebutter/webhook",
-    mode: "dry_run",
+    mode,
     events: ["transaction.succeeded", "campaign.created", "campaign.updated"],
   });
 }
@@ -33,7 +40,7 @@ export async function POST(request: Request) {
       JSON.stringify({
         source: "givebutter-webhook",
         receivedAt,
-        mode: "dry_run",
+        mode: getDonationParityMode(),
         rejected: true,
         reason: verification.reason,
         diagnosticHeaders,
@@ -68,32 +75,67 @@ export async function POST(request: Request) {
   const event = payload.event ?? "unknown";
 
   if (event === "transaction.succeeded") {
-    const summary = summarizeGivebutterDonationPayload(mapGivebutterDonation(payload), payload);
+    const donation = mapGivebutterDonation(payload);
+    const summary = summarizeGivebutterDonationPayload(donation, payload);
     const persistedPayload = await persistPayloadLog({
       receivedAt,
       event,
       rawBody,
       summary,
     });
+    const mode = getDonationParityMode();
 
-    console.log(
-      JSON.stringify({
-        source: "givebutter-webhook",
+    try {
+      const result = await processGivebutterDonation(createHubSpotClient(), donation, mode);
+
+      console.log(
+        JSON.stringify({
+          source: "givebutter-webhook",
+          receivedAt,
+          mode,
+          event,
+          verifiedBy: verification.method,
+          summary,
+          persistedPayload,
+          result,
+        }),
+      );
+
+      return NextResponse.json({
+        ok: true,
         receivedAt,
-        mode: "dry_run",
         event,
-        verifiedBy: verification.method,
-        summary,
-        persistedPayload,
-      }),
-    );
+        mode,
+        status: result.status,
+      });
+    } catch (error) {
+      const retryable = error instanceof HubSpotApiError ? error.retryable : true;
 
-    return NextResponse.json({
-      ok: true,
-      receivedAt,
-      event,
-      mode: "dry_run",
-    });
+      console.error(
+        JSON.stringify({
+          source: "givebutter-webhook",
+          receivedAt,
+          mode,
+          event,
+          failed: true,
+          retryable,
+          persistedPayload,
+          message: error instanceof Error ? error.message : "Unknown error",
+        }),
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+          receivedAt,
+          event,
+          mode,
+          error: "Givebutter donation processing failed.",
+          retryable,
+        },
+        { status: retryable ? 503 : 500 },
+      );
+    }
   }
 
   if (event === "campaign.created" || event === "campaign.updated") {
@@ -103,7 +145,7 @@ export async function POST(request: Request) {
       JSON.stringify({
         source: "givebutter-webhook",
         receivedAt,
-        mode: "dry_run",
+        mode: getDonationParityMode(),
         event,
         verifiedBy: verification.method,
         summary,
@@ -114,7 +156,7 @@ export async function POST(request: Request) {
       ok: true,
       receivedAt,
       event,
-      mode: "dry_run",
+      mode: getDonationParityMode(),
     });
   }
 
@@ -122,7 +164,7 @@ export async function POST(request: Request) {
     JSON.stringify({
       source: "givebutter-webhook",
       receivedAt,
-      mode: "dry_run",
+      mode: getDonationParityMode(),
       event,
       verifiedBy: verification.method,
       ignored: true,
@@ -133,7 +175,7 @@ export async function POST(request: Request) {
     ok: true,
     receivedAt,
     event,
-    mode: "dry_run",
+    mode: getDonationParityMode(),
     ignored: true,
   });
 }

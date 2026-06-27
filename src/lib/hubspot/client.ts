@@ -2,7 +2,7 @@ const HUBSPOT_API_BASE = "https://api.hubapi.com";
 
 export type HubSpotContact = {
   id: string;
-  properties: {
+  properties: Record<string, string | null | undefined> & {
     household_match_status?: string | null;
     suggested_household_match?: string | null;
   };
@@ -14,7 +14,7 @@ export type HubSpotContact = {
 
 export type HubSpotCompany = {
   id: string;
-  properties: {
+  properties: Record<string, string | null | undefined> & {
     name?: string | null;
     record_type?: string | null;
   };
@@ -22,7 +22,7 @@ export type HubSpotCompany = {
 
 export type HubSpotDeal = {
   id: string;
-  properties: {
+  properties: Record<string, string | null | undefined> & {
     givebutter_reference_number?: string | null;
     pipeline?: string | null;
   };
@@ -32,14 +32,52 @@ export type HubSpotDeal = {
   };
 };
 
+export type HubSpotAssociationType = {
+  category: "HUBSPOT_DEFINED" | "USER_DEFINED";
+  typeId: number;
+  label?: string | null;
+};
+
+export type HubSpotObjectAssociation = {
+  toObjectId: number | string;
+  associationTypes?: HubSpotAssociationType[];
+};
+
 export type HubSpotClient = {
   getContact(contactId: string): Promise<HubSpotContact>;
   getCompany(companyId: string): Promise<HubSpotCompany>;
   getDeal(dealId: string): Promise<HubSpotDeal>;
   getDeals(dealIds: string[]): Promise<HubSpotDeal[]>;
+  searchContacts(
+    propertyName: string,
+    value: string,
+    properties?: string[],
+  ): Promise<HubSpotContact[]>;
+  searchCompanies(
+    propertyName: string,
+    value: string,
+    properties?: string[],
+  ): Promise<HubSpotCompany[]>;
+  searchDeals(
+    propertyName: string,
+    value: string,
+    properties?: string[],
+  ): Promise<HubSpotDeal[]>;
+  createContact(properties: Record<string, string>): Promise<HubSpotContact>;
+  createCompany(properties: Record<string, string>): Promise<HubSpotCompany>;
+  createDeal(properties: Record<string, string>): Promise<HubSpotDeal>;
+  updateContact(contactId: string, properties: Record<string, string>): Promise<HubSpotContact>;
+  updateDeal(dealId: string, properties: Record<string, string>): Promise<HubSpotDeal>;
   updateContactProperties(contactId: string, properties: Record<string, string>): Promise<void>;
+  associateContactToDeal(contactId: string, dealId: string): Promise<void>;
+  associateContactToDealWithType(
+    contactId: string,
+    dealId: string,
+    associationTypeId: number,
+  ): Promise<void>;
   associateContactToCompany(contactId: string, companyId: string): Promise<void>;
   associateDealToCompany(dealId: string, companyId: string): Promise<void>;
+  getCompanyContactAssociations(companyId: string): Promise<HubSpotObjectAssociation[]>;
 };
 
 export class HubSpotApiError extends Error {
@@ -68,25 +106,98 @@ export function createHubSpotClient(input?: {
   }
 
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetchImpl(`${HUBSPOT_API_BASE}${path}`, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        ...init?.headers,
-      },
+    const maxAttempts = 4;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const response = await fetchImpl(`${HUBSPOT_API_BASE}${path}`, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+      });
+
+      if (response.status === 429 && attempt < maxAttempts) {
+        await delay(getRateLimitDelayMs(response.headers, attempt));
+        continue;
+      }
+
+      if (!response.ok) {
+        const body = (await response.text()).slice(0, 1000);
+        throw new HubSpotApiError(response.status, `HubSpot API ${response.status}: ${body}`);
+      }
+
+      if (response.status === 204 || response.headers.get("content-length") === "0") {
+        return undefined as T;
+      }
+
+      return (await response.json()) as T;
+    }
+
+    throw new HubSpotApiError(429, "HubSpot API rate limit retry budget exhausted.");
+  }
+
+  async function searchObjects<T>(
+    objectType: "contacts" | "companies" | "deals",
+    propertyName: string,
+    value: string,
+    properties: string[] = [],
+  ): Promise<T[]> {
+    const response = await request<{ results?: T[] }>(`/crm/v3/objects/${objectType}/search`, {
+      method: "POST",
+      body: JSON.stringify({
+        filterGroups: [
+          {
+            filters: [{ propertyName, operator: "EQ", value }],
+          },
+        ],
+        properties,
+        limit: 10,
+      }),
     });
 
-    if (!response.ok) {
-      const body = (await response.text()).slice(0, 1000);
-      throw new HubSpotApiError(response.status, `HubSpot API ${response.status}: ${body}`);
-    }
+    return response.results ?? [];
+  }
 
-    if (response.status === 204 || response.headers.get("content-length") === "0") {
-      return undefined as T;
-    }
+  async function createObject<T>(
+    objectType: "contacts" | "companies" | "deals",
+    properties: Record<string, string>,
+  ): Promise<T> {
+    return request<T>(`/crm/v3/objects/${objectType}`, {
+      method: "POST",
+      body: JSON.stringify({ properties }),
+    });
+  }
 
-    return (await response.json()) as T;
+  async function updateObject<T>(
+    objectType: "contacts" | "deals",
+    objectId: string,
+    properties: Record<string, string>,
+  ): Promise<T> {
+    return request<T>(`/crm/v3/objects/${objectType}/${encodeURIComponent(objectId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ properties }),
+    });
+  }
+
+  async function associateContactToDealWithType(
+    contactId: string,
+    dealId: string,
+    associationTypeId: number,
+  ): Promise<void> {
+    await request(
+      `/crm/v4/objects/contacts/${encodeURIComponent(contactId)}/associations/deals/${encodeURIComponent(dealId)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify([
+          {
+            associationCategory: "USER_DEFINED",
+            associationTypeId,
+          },
+        ]),
+      },
+    );
   }
 
   return {
@@ -131,12 +242,53 @@ export function createHubSpotClient(input?: {
       return response.results ?? [];
     },
 
+    searchContacts(propertyName, value, properties) {
+      return searchObjects<HubSpotContact>("contacts", propertyName, value, properties);
+    },
+
+    searchCompanies(propertyName, value, properties) {
+      return searchObjects<HubSpotCompany>("companies", propertyName, value, properties);
+    },
+
+    searchDeals(propertyName, value, properties) {
+      return searchObjects<HubSpotDeal>("deals", propertyName, value, properties);
+    },
+
+    createContact(properties) {
+      return createObject<HubSpotContact>("contacts", properties);
+    },
+
+    createCompany(properties) {
+      return createObject<HubSpotCompany>("companies", properties);
+    },
+
+    createDeal(properties) {
+      return createObject<HubSpotDeal>("deals", properties);
+    },
+
+    updateContact(contactId, properties) {
+      return updateObject<HubSpotContact>("contacts", contactId, properties);
+    },
+
+    updateDeal(dealId, properties) {
+      return updateObject<HubSpotDeal>("deals", dealId, properties);
+    },
+
     async updateContactProperties(contactId, properties) {
       await request(`/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, {
         method: "PATCH",
         body: JSON.stringify({ properties }),
       });
     },
+
+    async associateContactToDeal(contactId, dealId) {
+      await request(
+        `/crm/v4/objects/contacts/${encodeURIComponent(contactId)}/associations/default/deals/${encodeURIComponent(dealId)}`,
+        { method: "PUT" },
+      );
+    },
+
+    associateContactToDealWithType,
 
     async associateContactToCompany(contactId, companyId) {
       await request(
@@ -151,5 +303,43 @@ export function createHubSpotClient(input?: {
         { method: "PUT" },
       );
     },
+
+    async getCompanyContactAssociations(companyId) {
+      const response = await request<{ results?: HubSpotObjectAssociation[] }>(
+        `/crm/v4/objects/companies/${encodeURIComponent(companyId)}/associations/contacts?limit=500`,
+      );
+
+      return response.results ?? [];
+    },
   };
+}
+
+function getRateLimitDelayMs(headers: Headers, attempt: number): number {
+  const retryAfter = headers.get("retry-after");
+
+  if (retryAfter !== null) {
+    const seconds = Number(retryAfter);
+
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.min(seconds * 1000, 10_000);
+    }
+
+    const retryAt = Date.parse(retryAfter);
+
+    if (Number.isFinite(retryAt)) {
+      return Math.min(Math.max(retryAt - Date.now(), 0), 10_000);
+    }
+  }
+
+  const interval = Number(headers.get("x-hubspot-ratelimit-interval-milliseconds"));
+
+  if (Number.isFinite(interval) && interval > 0) {
+    return Math.min(interval, 10_000);
+  }
+
+  return Math.min(1000 * 2 ** (attempt - 1), 10_000);
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

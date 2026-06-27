@@ -1,0 +1,504 @@
+import { getFallbackEmail, type GivebutterDonation } from "../givebutter/payloads.ts";
+import type {
+  HubSpotClient,
+  HubSpotCompany,
+  HubSpotContact,
+  HubSpotDeal,
+} from "./client";
+
+export const INDIVIDUAL_DONATIONS_PIPELINE_ID = "155504019";
+export const DONATION_COMPLETE_STAGE_ID = "261678424";
+export const PORCH_DONATION_OWNER_ID = "807444275";
+export const CHAPTER_FINANCIAL_DONOR_ASSOCIATION_TYPE_ID = 10;
+export const COMPANY_DONATION_CONTACT_ASSOCIATION_TYPE_ID = 3;
+export const CHAPTER_DONATION_CONTACT_ASSOCIATION_TYPE_ID = 13;
+
+export type DonationParityMode = "shadow" | "write";
+
+type DonationParityClient = Pick<
+  HubSpotClient,
+  | "searchContacts"
+  | "searchCompanies"
+  | "searchDeals"
+  | "createContact"
+  | "createCompany"
+  | "createDeal"
+  | "updateContact"
+  | "updateDeal"
+  | "associateContactToDeal"
+  | "associateContactToDealWithType"
+  | "associateContactToCompany"
+  | "associateDealToCompany"
+  | "getCompanyContactAssociations"
+>;
+
+type ObjectOutcome = {
+  action: "create" | "update" | "would_create" | "would_update";
+  id: string | null;
+};
+
+export type DonationParityResult = {
+  status: "processed" | "shadowed" | "needs_attention";
+  mode: DonationParityMode;
+  transactionId: string | null;
+  referenceNumber: string | null;
+  contact?: ObjectOutcome;
+  deal?: ObjectOutcome;
+  destination?: "Chapter" | "PORCH-Communities";
+  chapterCompanyId?: string | null;
+  donorCompany?: ObjectOutcome | null;
+  actions: string[];
+  warnings: string[];
+  reason?: string;
+};
+
+export function getDonationParityMode(
+  value = process.env.GIVEBUTTER_HUBSPOT_MODE,
+): DonationParityMode {
+  return value?.trim().toLowerCase() === "write" ? "write" : "shadow";
+}
+
+export async function processGivebutterDonation(
+  client: DonationParityClient,
+  donation: GivebutterDonation,
+  mode: DonationParityMode,
+): Promise<DonationParityResult> {
+  const actions: string[] = [];
+  const warnings: string[] = [];
+  const transactionId = asString(donation.transactionId);
+  const referenceNumber = asString(donation.transactionNumber);
+  const fallbackEmail = getFallbackEmail(donation);
+
+  if (!transactionId && !referenceNumber) {
+    return needsAttention(mode, donation, "Donation has no Givebutter transaction identifier.");
+  }
+
+  if (!fallbackEmail) {
+    return needsAttention(mode, donation, "Donation has neither an email nor a Givebutter Contact ID.");
+  }
+
+  const existingContact = await findExistingContact(client, donation, fallbackEmail, warnings);
+  const contactProperties = buildContactProperties(donation, fallbackEmail);
+  const contact = await upsertContact(client, existingContact, contactProperties, mode, actions);
+
+  const chapterCompany = await findFirstCompany(
+    client,
+    "givebutter_code",
+    donation.campaignCode,
+    warnings,
+    "chapter company",
+  );
+  const destination = chapterCompany ? "Chapter" : "PORCH-Communities";
+
+  if (!donation.campaignCode) {
+    warnings.push("Donation has no campaign code; routed to PORCH Communities.");
+  }
+
+  const existingDeal = await findExistingDeal(client, transactionId, referenceNumber, warnings);
+  const dealProperties = buildDealProperties(donation, destination);
+  const deal = await upsertDeal(client, existingDeal, dealProperties, mode, actions);
+
+  if (mode === "write") {
+    if (!contact.id || !deal.id) {
+      throw new Error("Write mode did not produce HubSpot contact and deal IDs.");
+    }
+
+    await client.associateContactToDeal(contact.id, deal.id);
+    actions.push("associate_contact_to_deal");
+
+    if (chapterCompany) {
+      await associateChapterPath(client, contact.id, deal.id, chapterCompany, actions, warnings);
+    }
+  } else {
+    actions.push("would_associate_contact_to_deal");
+
+    if (chapterCompany) {
+      actions.push(
+        "would_associate_deal_to_chapter",
+        "would_add_chapter_financial_donor_association",
+      );
+      const chapterLeadId = await findChapterLeadContactId(client, chapterCompany.id, warnings);
+
+      if (chapterLeadId) {
+        actions.push("would_add_chapter_donation_contact_association");
+      }
+    }
+  }
+
+  const donorCompany = await processDonorCompany(
+    client,
+    donation.companyName,
+    contact.id,
+    deal.id,
+    mode,
+    actions,
+    warnings,
+  );
+
+  return {
+    status: mode === "write" ? "processed" : "shadowed",
+    mode,
+    transactionId,
+    referenceNumber,
+    contact,
+    deal,
+    destination,
+    chapterCompanyId: chapterCompany?.id ?? null,
+    donorCompany,
+    actions,
+    warnings,
+  };
+}
+
+export function buildContactProperties(
+  donation: GivebutterDonation,
+  fallbackEmail = getFallbackEmail(donation),
+): Record<string, string> {
+  return compactProperties({
+    email: fallbackEmail,
+    address: donation.address.line1,
+    city: donation.address.city,
+    state: donation.address.state,
+    zip: donation.address.postalCode,
+    country: donation.address.country,
+    firstname: donation.firstName,
+    lastname: donation.lastName,
+    company: donation.companyName,
+    givebutter_contact_id: asString(donation.contactId),
+    mobilephone: donation.phone,
+    phone: donation.phone,
+    closedate: donation.createdAt ?? donation.transactedAt,
+    hs_latest_source: "DIRECT_TRAFFIC",
+    hubspot_owner_id: PORCH_DONATION_OWNER_ID,
+  });
+}
+
+export function buildDealProperties(
+  donation: GivebutterDonation,
+  destination: "Chapter" | "PORCH-Communities",
+): Record<string, string> {
+  const eventDate = donation.createdAt ?? donation.transactedAt;
+  const donorName = [donation.firstName, donation.lastName].filter(Boolean).join(" ").trim();
+  const amount = donation.amount === null ? null : String(donation.amount);
+  const dealName = [`$${amount ?? ""}`, donorName].filter(Boolean).join(" ").trim();
+  const campaign = [donation.campaignTitle, donation.campaignCode].filter(Boolean).join(" ").trim();
+  const donorAddress = [
+    donation.address.line1,
+    donation.address.line2,
+    donation.address.city,
+    donation.address.state,
+    donation.address.postalCode,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const referenceNumber = asString(donation.transactionNumber);
+
+  return compactProperties({
+    dealname: dealName || `Givebutter Donation ${referenceNumber ?? ""}`.trim(),
+    pipeline: INDIVIDUAL_DONATIONS_PIPELINE_ID,
+    dealstage: DONATION_COMPLETE_STAGE_ID,
+    amount,
+    chapter_city: donation.address.city,
+    chapter_state: donation.address.state,
+    closedate: eventDate,
+    createdate: eventDate,
+    dedication_name: donation.dedication.name,
+    dedication_recipient_email: donation.dedication.recipientEmail,
+    dedication_recipient_name: donation.dedication.recipientName,
+    dedication_type: donation.dedication.type,
+    description: referenceNumber,
+    donor_address: donorAddress,
+    givebutter_campaign: campaign,
+    givebutter_company_name: donation.companyName,
+    givebutter_message: donation.message,
+    givebutter_reference_number: isNumericIdentifier(referenceNumber) ? referenceNumber : null,
+    givebutter_transaction_id: asString(donation.transactionId),
+    hubspot_owner_id: PORCH_DONATION_OWNER_ID,
+    destination,
+    referrer: donation.utm.referrer,
+    utm_campaign: donation.utm.campaign,
+    utm_content: donation.utm.content,
+    utm_medium: donation.utm.medium,
+    utm_source: donation.utm.source,
+    utm_term: donation.utm.term,
+  });
+}
+
+async function findExistingContact(
+  client: DonationParityClient,
+  donation: GivebutterDonation,
+  fallbackEmail: string,
+  warnings: string[],
+): Promise<HubSpotContact | null> {
+  const contactId = asString(donation.contactId);
+
+  if (contactId) {
+    const byGivebutterId = await client.searchContacts("givebutter_contact_id", contactId, [
+      "email",
+      "givebutter_contact_id",
+    ]);
+    const match = firstResult(byGivebutterId, warnings, "Givebutter Contact ID");
+
+    if (match) {
+      return match;
+    }
+  }
+
+  const byEmail = await client.searchContacts("email", fallbackEmail, [
+    "email",
+    "givebutter_contact_id",
+  ]);
+
+  return firstResult(byEmail, warnings, "email");
+}
+
+async function findExistingDeal(
+  client: DonationParityClient,
+  transactionId: string | null,
+  referenceNumber: string | null,
+  warnings: string[],
+): Promise<HubSpotDeal | null> {
+  if (transactionId) {
+    const byTransactionId = await client.searchDeals(
+      "givebutter_transaction_id",
+      transactionId,
+      ["givebutter_transaction_id", "givebutter_reference_number", "pipeline"],
+    );
+    const match = firstResult(byTransactionId, warnings, "Givebutter Transaction ID");
+
+    if (match) {
+      return match;
+    }
+  }
+
+  if (isNumericIdentifier(referenceNumber)) {
+    const byReference = await client.searchDeals(
+      "givebutter_reference_number",
+      referenceNumber,
+      ["givebutter_transaction_id", "givebutter_reference_number", "pipeline"],
+    );
+
+    return firstResult(byReference, warnings, "Givebutter Reference Number");
+  }
+
+  return null;
+}
+
+async function upsertContact(
+  client: DonationParityClient,
+  existing: HubSpotContact | null,
+  properties: Record<string, string>,
+  mode: DonationParityMode,
+  actions: string[],
+): Promise<ObjectOutcome> {
+  if (mode === "shadow") {
+    const action = existing ? "would_update" : "would_create";
+    actions.push(`${action}_contact`);
+    return { action, id: existing?.id ?? null };
+  }
+
+  if (existing) {
+    const updated = await client.updateContact(existing.id, properties);
+    actions.push("update_contact");
+    return { action: "update", id: updated.id };
+  }
+
+  const created = await client.createContact(properties);
+  actions.push("create_contact");
+  return { action: "create", id: created.id };
+}
+
+async function upsertDeal(
+  client: DonationParityClient,
+  existing: HubSpotDeal | null,
+  properties: Record<string, string>,
+  mode: DonationParityMode,
+  actions: string[],
+): Promise<ObjectOutcome> {
+  if (mode === "shadow") {
+    const action = existing ? "would_update" : "would_create";
+    actions.push(`${action}_deal`);
+    return { action, id: existing?.id ?? null };
+  }
+
+  if (existing) {
+    const updateProperties = { ...properties };
+    delete updateProperties.createdate;
+    const updated = await client.updateDeal(existing.id, updateProperties);
+    actions.push("update_deal");
+    return { action: "update", id: updated.id };
+  }
+
+  const created = await client.createDeal(properties);
+  actions.push("create_deal");
+  return { action: "create", id: created.id };
+}
+
+async function associateChapterPath(
+  client: DonationParityClient,
+  contactId: string,
+  dealId: string,
+  chapterCompany: HubSpotCompany,
+  actions: string[],
+  warnings: string[],
+): Promise<void> {
+  await client.associateDealToCompany(dealId, chapterCompany.id);
+  actions.push("associate_deal_to_chapter");
+
+  await client.associateContactToDealWithType(
+    contactId,
+    dealId,
+    CHAPTER_FINANCIAL_DONOR_ASSOCIATION_TYPE_ID,
+  );
+  actions.push("add_chapter_financial_donor_association");
+
+  const chapterLeadId = await findChapterLeadContactId(client, chapterCompany.id, warnings);
+
+  if (chapterLeadId) {
+    await client.associateContactToDealWithType(
+      chapterLeadId,
+      dealId,
+      CHAPTER_DONATION_CONTACT_ASSOCIATION_TYPE_ID,
+    );
+    actions.push("add_chapter_donation_contact_association");
+  }
+}
+
+async function findChapterLeadContactId(
+  client: DonationParityClient,
+  chapterCompanyId: string,
+  warnings: string[],
+): Promise<string | null> {
+  const associations = await client.getCompanyContactAssociations(chapterCompanyId);
+  const leads = associations.filter((association) =>
+    association.associationTypes?.some(
+      (type) => type.typeId === COMPANY_DONATION_CONTACT_ASSOCIATION_TYPE_ID,
+    ),
+  );
+
+  if (leads.length > 1) {
+    warnings.push(
+      `Chapter company ${chapterCompanyId} has multiple Donation Contact associations; using the first.`,
+    );
+  }
+
+  if (leads.length === 0) {
+    warnings.push(`Chapter company ${chapterCompanyId} has no Donation Contact association.`);
+    return null;
+  }
+
+  return String(leads[0].toObjectId);
+}
+
+async function processDonorCompany(
+  client: DonationParityClient,
+  companyName: string | null,
+  contactId: string | null,
+  dealId: string | null,
+  mode: DonationParityMode,
+  actions: string[],
+  warnings: string[],
+): Promise<ObjectOutcome | null> {
+  if (!companyName?.trim()) {
+    return null;
+  }
+
+  const existing = await findFirstCompany(
+    client,
+    "name",
+    companyName,
+    warnings,
+    "donor company",
+  );
+
+  if (mode === "shadow") {
+    const action = existing ? "would_update" : "would_create";
+    actions.push(existing ? "would_use_existing_donor_company" : "would_create_donor_company");
+    actions.push("would_associate_contact_to_donor_company", "would_associate_deal_to_donor_company");
+    return { action, id: existing?.id ?? null };
+  }
+
+  if (!contactId || !dealId) {
+    throw new Error("Cannot associate donor company without contact and deal IDs.");
+  }
+
+  const company = existing ?? (await client.createCompany({ name: companyName.trim() }));
+  actions.push(existing ? "use_existing_donor_company" : "create_donor_company");
+
+  await client.associateContactToCompany(contactId, company.id);
+  await client.associateDealToCompany(dealId, company.id);
+  actions.push("associate_contact_to_donor_company", "associate_deal_to_donor_company");
+
+  return { action: existing ? "update" : "create", id: company.id };
+}
+
+async function findFirstCompany(
+  client: DonationParityClient,
+  propertyName: string,
+  value: string | null,
+  warnings: string[],
+  description: string,
+): Promise<HubSpotCompany | null> {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  const results = await client.searchCompanies(propertyName, value.trim(), [
+    "name",
+    "givebutter_code",
+    "record_type",
+  ]);
+
+  return firstResult(results, warnings, description);
+}
+
+function firstResult<T extends { id: string }>(
+  results: T[],
+  warnings: string[],
+  description: string,
+): T | null {
+  if (results.length > 1) {
+    warnings.push(`Multiple HubSpot records matched ${description}; using the first result.`);
+  }
+
+  return results[0] ?? null;
+}
+
+function compactProperties(
+  properties: Record<string, string | number | null | undefined>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(properties)
+      .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== "")
+      .map(([key, value]) => [key, String(value)]),
+  );
+}
+
+function asString(value: string | number | null | undefined): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const normalized = String(value).trim();
+  return normalized || null;
+}
+
+function isNumericIdentifier(value: string | null): value is string {
+  return Boolean(value && /^\d+$/.test(value));
+}
+
+function needsAttention(
+  mode: DonationParityMode,
+  donation: GivebutterDonation,
+  reason: string,
+): DonationParityResult {
+  return {
+    status: "needs_attention",
+    mode,
+    transactionId: asString(donation.transactionId),
+    referenceNumber: asString(donation.transactionNumber),
+    actions: [],
+    warnings: [],
+    reason,
+  };
+}
