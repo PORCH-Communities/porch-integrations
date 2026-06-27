@@ -11,12 +11,17 @@ export type GivebutterDonation = {
   transactionId: string | number | null;
   transactionNumber: string | number | null;
   contactId: string | number | null;
+  donorType: "person" | "organization" | "unknown";
   firstName: string | null;
   lastName: string | null;
   email: string | null;
   phone: string | null;
   companyName: string | null;
+  paymentMethod: string | null;
+  isOffline: boolean;
+  isRecurring: boolean;
   amount: number | null;
+  feeCovered: number | null;
   currency: string | null;
   status: string | null;
   campaignId: string | number | null;
@@ -25,6 +30,8 @@ export type GivebutterDonation = {
   createdAt: string | null;
   transactedAt: string | null;
   message: string | null;
+  childTransactionCount: number;
+  hasFeeLineItem: boolean;
   dedication: {
     type: string | null;
     name: string | null;
@@ -82,23 +89,39 @@ export function mapGivebutterDonation(payload: GivebutterWebhookPayload): Givebu
   const data = asRecord(payload.data) ?? {};
   const address = asRecord(data.address) ?? {};
   const dedication = asRecord(data.dedication) ?? {};
+  const dedicationRecipient = asRecord(dedication.recipient) ?? {};
   const givingSpace = asRecord(data.giving_space) ?? {};
-  const attributionData = asRecord(data.attribution_data) ?? {};
-  const utmParameters = asRecord(data.utm_parameters) ?? attributionData;
+  const attributionData = asRecord(data.attribution_data);
+  const utmParameters = firstRecord(data.utm_parameters, attributionData) ?? {};
   const transactions = Array.isArray(data.transactions) ? data.transactions : [];
   const firstTransaction = asRecord(transactions[0]) ?? {};
+  const lineItems = transactions.flatMap((transaction) => {
+    const record = asRecord(transaction);
+
+    return Array.isArray(record?.line_items) ? record.line_items : [];
+  });
+  const companyName = firstString(data.company_name, data.company, address.company);
+  const firstName = firstString(data.first_name);
+  const lastName = firstString(data.last_name);
 
   return {
     eventId: firstId(payload.id),
     transactionId: firstId(data.id),
     transactionNumber: firstId(data.number, firstTransaction.id),
     contactId: firstId(data.contact_id),
-    firstName: firstString(data.first_name),
-    lastName: firstString(data.last_name),
+    donorType: getDonorType({ companyName, firstName, lastName }),
+    firstName,
+    lastName,
     email: firstString(data.email),
     phone: firstString(data.phone),
-    companyName: firstString(data.company_name, data.company, address.company),
+    companyName,
+    paymentMethod: firstString(data.payment_method, data.method),
+    isOffline: data.is_offline === true,
+    isRecurring:
+      data.is_recurring === true ||
+      transactions.some((transaction) => asRecord(transaction)?.is_recurring === true),
     amount: firstNumber(data.amount, firstTransaction.amount),
+    feeCovered: firstNumber(data.fee_covered, firstTransaction.fee_covered),
     currency: firstString(data.currency),
     status: firstString(data.status),
     campaignId: firstId(data.campaign_id),
@@ -107,11 +130,17 @@ export function mapGivebutterDonation(payload: GivebutterWebhookPayload): Givebu
     createdAt: firstString(data.created_at),
     transactedAt: firstString(data.transacted_at),
     message: firstString(givingSpace.message, data.message),
+    childTransactionCount: transactions.length,
+    hasFeeLineItem: lineItems.some((lineItem) => asRecord(lineItem)?.subtype === "fee"),
     dedication: {
       type: firstString(dedication.type),
       name: firstString(dedication.name),
-      recipientName: firstString(dedication.recipient_name),
-      recipientEmail: firstString(dedication.recipient_email),
+      recipientName: firstString(
+        dedication.recipient_name,
+        dedication.recipient,
+        dedicationRecipient.name,
+      ),
+      recipientEmail: firstString(dedication.recipient_email, dedicationRecipient.email),
     },
     address: {
       company: firstString(address.company),
@@ -172,7 +201,12 @@ export function summarizeGivebutterDonationPayload(
     campaignCode: hasValue(donation.campaignCode),
     campaignTitle: hasValue(donation.campaignTitle),
     transactedAt: hasValue(donation.transactedAt),
+    paymentMethod: hasValue(donation.paymentMethod),
     address: hasValue(donation.address.line1) || hasValue(donation.address.postalCode),
+    company: hasValue(donation.companyName),
+    organizationDonor: donation.donorType === "organization",
+    offline: donation.isOffline,
+    recurring: donation.isRecurring,
     utm: Object.values(donation.utm).some(hasValue),
     dedication: Object.values(donation.dedication).some(hasValue),
   };
@@ -212,6 +246,16 @@ function asRecord(value: unknown): JsonRecord | null {
   return isRecord(value) ? value : null;
 }
 
+function firstRecord(...values: unknown[]): JsonRecord | null {
+  for (const value of values) {
+    if (isRecord(value)) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -248,6 +292,22 @@ function firstId(...values: unknown[]): string | number | null {
   }
 
   return null;
+}
+
+function getDonorType(input: {
+  companyName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+}): GivebutterDonation["donorType"] {
+  if (input.companyName && !input.firstName && !input.lastName) {
+    return "organization";
+  }
+
+  if (input.firstName || input.lastName) {
+    return "person";
+  }
+
+  return input.companyName ? "organization" : "unknown";
 }
 
 function summarizePayloadKeys(payload: GivebutterWebhookPayload) {
