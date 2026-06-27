@@ -51,7 +51,7 @@ test("routes 'no_match' status to rejectDealMatch", async () => {
   const updateCall = calls.find((c) => c[0] === "updateDealProperties");
   assert.ok(updateCall, "should call updateDealProperties");
   assert.equal(updateCall[1], "holding-deal-1");
-  assert.equal(updateCall[2].deal_match_status, "unprocessed");
+  assert.equal(updateCall[2].deal_match_status, "no_match");
   assert.equal(updateCall[2].pipeline, "155504019");
   assert.equal(updateCall[2].dealstage, "261678424");
 });
@@ -255,7 +255,7 @@ test("rejectDealMatch promotes holding deal to Individual Donations and clears m
   const props = updateCall[2];
   assert.equal(props.pipeline, "155504019");
   assert.equal(props.dealstage, "261678424");
-  assert.equal(props.deal_match_status, "unprocessed");
+  assert.equal(props.deal_match_status, "no_match");
   assert.equal(props.candidate_deal_id, "");
   assert.equal(props.deal_match_score, "");
   assert.equal(props.deal_match_signals, "");

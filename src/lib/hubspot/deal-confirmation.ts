@@ -178,7 +178,7 @@ async function rejectDealMatch(
   await client.updateDealProperties(holdingDealId, {
     pipeline: "155504019",        // Individual Donations
     dealstage: "261678424",       // Donation Complete
-    deal_match_status: "unprocessed",
+    deal_match_status: "no_match",
     deal_match_score: "",
     deal_match_signals: "",
     candidate_deal_id: "",
