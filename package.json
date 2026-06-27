@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --experimental-strip-types --test src/lib/householding/matching.test.mjs src/lib/hubspot/*.test.mjs",
     "givebutter:sample-transactions": "node --env-file=.env scripts/sample-givebutter-transactions.mjs"
   },
   "dependencies": {

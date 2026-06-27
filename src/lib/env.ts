@@ -1,6 +1,7 @@
 const requiredEnvVars = [
   "GIVEBUTTER_API_KEY",
   "HUBSPOT_PRIVATE_APP_TOKEN",
+  "HUBSPOT_CLIENT_SECRET",
   "ZAPIER_WEBHOOK_SECRET",
 ] as const;
 

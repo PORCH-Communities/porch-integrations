@@ -21,6 +21,10 @@ const streetSuffixes = new Map([
   ["circle", "cir"],
 ]);
 
+const AUTO_HOUSEHOLD_SCORE = 80;
+const NEEDS_REVIEW_SCORE = 40;
+const AMBIGUITY_SCORE_MARGIN = 10;
+
 export type MatchableContact = {
   firstName?: string | null;
   lastName?: string | null;
@@ -138,24 +142,48 @@ export function findBestHouseholdMatch(
     .map((candidate) => scoreHouseholdCandidate(contact, candidate))
     .sort((a, b) => b.score - a.score);
 
-  return (
-    ranked[0] ?? {
+  const bestMatch = ranked[0];
+
+  if (!bestMatch) {
+    return {
       candidate: null,
       decision: "no_match",
       score: 0,
       signals: ["no_candidates"],
-    }
-  );
+    };
+  }
+
+  const runnerUp = ranked[1];
+
+  if (runnerUp && isAmbiguousMatch(bestMatch.score, runnerUp.score)) {
+    return {
+      ...bestMatch,
+      decision: "needs_review",
+      signals: [...bestMatch.signals, "ambiguous_candidates"],
+    };
+  }
+
+  return bestMatch;
 }
 
 function getDecision(score: number): HouseholdMatchResult["decision"] {
-  if (score >= 80) {
+  if (score >= AUTO_HOUSEHOLD_SCORE) {
     return "auto_household";
   }
 
-  if (score >= 40) {
+  if (score >= NEEDS_REVIEW_SCORE) {
     return "needs_review";
   }
 
   return "no_match";
+}
+
+function isAmbiguousMatch(bestScore: number, runnerUpScore: number): boolean {
+  if (runnerUpScore >= AUTO_HOUSEHOLD_SCORE) {
+    return true;
+  }
+
+  return (
+    runnerUpScore >= NEEDS_REVIEW_SCORE && bestScore - runnerUpScore <= AMBIGUITY_SCORE_MARGIN
+  );
 }
