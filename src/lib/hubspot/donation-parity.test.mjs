@@ -198,7 +198,7 @@ test("a retried chapter donation updates existing records and reapplies idempote
         name === "associateContactToDealWithType" &&
         contactId === "contact-existing" &&
         dealId === "deal-existing" &&
-        typeId === 10,
+        typeId === 11,
     ),
   );
   assert.ok(
@@ -207,7 +207,7 @@ test("a retried chapter donation updates existing records and reapplies idempote
         name === "associateContactToDealWithType" &&
         contactId === "chapter-lead-1" &&
         dealId === "deal-existing" &&
-        typeId === 13,
+        typeId === 12,
     ),
   );
 });

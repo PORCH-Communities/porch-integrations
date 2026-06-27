@@ -137,7 +137,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       { ok: false, error: "Household confirmation processing failed.", retryable },
-      { status: retryable ? 503 : 200 },
+      { status: retryable ? 503 : 500 },
     );
   }
 }

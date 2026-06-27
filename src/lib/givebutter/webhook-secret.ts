@@ -1,4 +1,6 @@
-import { createHmac, type BinaryLike, timingSafeEqual } from "node:crypto";
+import { createHmac, type BinaryLike } from "node:crypto";
+
+import { secureEqual } from "../crypto.ts";
 
 const SIGNATURE_HEADERS = [
   "signature",
@@ -40,14 +42,6 @@ export function verifyGivebutterWebhookSecret(
 
   if (signatures.length === 0) {
     return { ok: false, reason: "missing_signature" };
-  }
-
-  const matchesSharedSecretSignature = signatures.some((signature) =>
-    secureEqual(signature, configuredSecret),
-  );
-
-  if (matchesSharedSecretSignature) {
-    return { ok: true, method: "shared_secret" };
   }
 
   const expectedSignatures = getSecretKeyCandidates(configuredSecret).flatMap((secretKey) => [
@@ -129,13 +123,3 @@ function decodeBase64Secret(secret: string): Buffer | null {
   }
 }
 
-function secureEqual(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-
-  if (leftBuffer.byteLength !== rightBuffer.byteLength) {
-    return false;
-  }
-
-  return timingSafeEqual(leftBuffer, rightBuffer);
-}

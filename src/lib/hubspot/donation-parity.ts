@@ -9,9 +9,9 @@ import type {
 export const INDIVIDUAL_DONATIONS_PIPELINE_ID = "155504019";
 export const DONATION_COMPLETE_STAGE_ID = "261678424";
 export const PORCH_DONATION_OWNER_ID = "807444275";
-export const CHAPTER_FINANCIAL_DONOR_ASSOCIATION_TYPE_ID = 10;
+export const CHAPTER_FINANCIAL_DONOR_ASSOCIATION_TYPE_ID = 11;
 export const COMPANY_DONATION_CONTACT_ASSOCIATION_TYPE_ID = 3;
-export const CHAPTER_DONATION_CONTACT_ASSOCIATION_TYPE_ID = 13;
+export const CHAPTER_DONATION_CONTACT_ASSOCIATION_TYPE_ID = 12;
 
 export type DonationParityMode = "shadow" | "write";
 
@@ -33,7 +33,7 @@ type DonationParityClient = Pick<
 >;
 
 type ObjectOutcome = {
-  action: "create" | "update" | "would_create" | "would_update";
+  action: "create" | "update" | "use_existing" | "would_create" | "would_update";
   id: string | null;
 };
 
@@ -430,7 +430,7 @@ async function processDonorCompany(
   await client.associateDealToCompany(dealId, company.id);
   actions.push("associate_contact_to_donor_company", "associate_deal_to_donor_company");
 
-  return { action: existing ? "update" : "create", id: company.id };
+  return { action: existing ? "use_existing" : "create", id: company.id };
 }
 
 async function findFirstCompany(

@@ -1,21 +1,8 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac } from "node:crypto";
+
+import { secureEqual } from "../crypto.ts";
 
 const MAX_SIGNATURE_AGE_MS = 5 * 60 * 1000;
-const URI_DECODE_PATTERN = /%3A|%2F|%3F|%40|%21|%24|%27|%28|%29|%2A|%2C|%3B/gi;
-const URI_DECODE_VALUES: Record<string, string> = {
-  "%3A": ":",
-  "%2F": "/",
-  "%3F": "?",
-  "%40": "@",
-  "%21": "!",
-  "%24": "$",
-  "%27": "'",
-  "%28": "(",
-  "%29": ")",
-  "%2A": "*",
-  "%2C": ",",
-  "%3B": ";",
-};
 
 export type HubSpotSignatureVerification =
   | { ok: true }
@@ -81,18 +68,10 @@ export function getHubSpotRequestUri(request: Request): string {
 }
 
 function decodeHubSpotSignatureUri(uri: string): string {
-  return uri.replace(URI_DECODE_PATTERN, (encoded) => URI_DECODE_VALUES[encoded.toUpperCase()]);
+  return decodeURIComponent(uri);
 }
 
 function firstHeaderValue(value: string | null): string | null {
   return value?.split(",")[0]?.trim() || null;
 }
 
-function secureEqual(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-
-  return (
-    leftBuffer.byteLength === rightBuffer.byteLength && timingSafeEqual(leftBuffer, rightBuffer)
-  );
-}

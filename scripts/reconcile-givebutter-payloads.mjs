@@ -7,13 +7,16 @@ import { createHubSpotClient } from "../src/lib/hubspot/client.ts";
 import {
   buildContactProperties,
   buildDealProperties,
+  CHAPTER_FINANCIAL_DONOR_ASSOCIATION_TYPE_ID,
+  CHAPTER_DONATION_CONTACT_ASSOCIATION_TYPE_ID,
+  COMPANY_DONATION_CONTACT_ASSOCIATION_TYPE_ID,
 } from "../src/lib/hubspot/donation-parity.ts";
 
 const BLOB_PREFIX = "givebutter-payload-logs/";
 const DEAL_CONTACT_DEFAULT_TYPE_ID = 3;
-const DEAL_CHAPTER_FINANCIAL_DONOR_TYPE_ID = 11;
-const DEAL_CHAPTER_DONATION_CONTACT_TYPE_ID = 12;
-const COMPANY_DONATION_CONTACT_TYPE_ID = 3;
+const DEAL_CHAPTER_FINANCIAL_DONOR_TYPE_ID = CHAPTER_FINANCIAL_DONOR_ASSOCIATION_TYPE_ID;
+const DEAL_CHAPTER_DONATION_CONTACT_TYPE_ID = CHAPTER_DONATION_CONTACT_ASSOCIATION_TYPE_ID;
+const COMPANY_DONATION_CONTACT_TYPE_ID = COMPANY_DONATION_CONTACT_ASSOCIATION_TYPE_ID;
 
 const args = parseArgs(process.argv.slice(2));
 const client = createHubSpotClient();
@@ -27,11 +30,7 @@ if (blobs.length === 0) {
   process.exit(0);
 }
 
-const results = [];
-
-for (const blob of blobs) {
-  results.push(await reconcileBlob(blob));
-}
+const results = await Promise.all(blobs.map(reconcileBlob));
 
 const summary = {
   count: results.length,
@@ -238,7 +237,7 @@ function compareProperties(scope, expected, actual) {
     const actualValue = actual[field] ?? null;
     const matches = equivalent(field, expectedValue, actualValue);
 
-    if (field === "givebutter_transaction_id" && !actualValue) {
+    if (field === "givebutter_transaction_id" && !actualValue && !expectedValue) {
       return { scope, field, status: "expected_difference" };
     }
 
