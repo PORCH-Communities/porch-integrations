@@ -55,6 +55,7 @@ test("builds the audited contact and deal field mappings", () => {
     givebutter_transaction_id: "txn-token",
     hubspot_owner_id: "807444275",
     destination: "Chapter",
+    deal_match_status: "unprocessed",
     referrer: "https://example.org",
     utm_campaign: "summer",
     utm_content: "button",
@@ -274,6 +275,22 @@ function makeClient(calls, overrides = {}) {
     async getCompanyContactAssociations(companyId) {
       calls.push(["getCompanyContactAssociations", companyId]);
       return [];
+    },
+    async getDealContactAssociations(id) {
+      calls.push(["getDealContactAssociations", id]);
+      return [];
+    },
+    async getDealCompanyAssociations(id) {
+      calls.push(["getDealCompanyAssociations", id]);
+      return [];
+    },
+    async getDeals(ids, properties) {
+      calls.push(["getDeals", ids, properties]);
+      return [];
+    },
+    async getCompany(id) {
+      calls.push(["getCompany", id]);
+      return { id, properties: { name: null, record_type: null } };
     },
     ...overrides,
   };

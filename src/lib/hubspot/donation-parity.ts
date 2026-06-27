@@ -5,6 +5,12 @@ import type {
   HubSpotContact,
   HubSpotDeal,
 } from "./client";
+import {
+  DEAL_MATCH_PIPELINES,
+  findDealCandidates,
+  findBestDealMatch,
+  type DealMatchResult,
+} from "./deal-matching.ts";
 
 export const INDIVIDUAL_DONATIONS_PIPELINE_ID = "155504019";
 export const DONATION_COMPLETE_STAGE_ID = "261678424";
@@ -20,6 +26,8 @@ type DonationParityClient = Pick<
   | "searchContacts"
   | "searchCompanies"
   | "searchDeals"
+  | "getDeals"
+  | "getCompany"
   | "createContact"
   | "createCompany"
   | "createDeal"
@@ -30,6 +38,8 @@ type DonationParityClient = Pick<
   | "associateContactToCompany"
   | "associateDealToCompany"
   | "getCompanyContactAssociations"
+  | "getDealContactAssociations"
+  | "getDealCompanyAssociations"
 >;
 
 type ObjectOutcome = {
@@ -47,6 +57,7 @@ export type DonationParityResult = {
   destination?: "Chapter" | "PORCH-Communities";
   chapterCompanyId?: string | null;
   donorCompany?: ObjectOutcome | null;
+  dealMatchResult?: DealMatchResult | null;
   actions: string[];
   warnings: string[];
   reason?: string;
@@ -95,9 +106,15 @@ export async function processGivebutterDonation(
     warnings.push("Donation has no campaign code; routed to PORCH Communities.");
   }
 
-  const existingDeal = await findExistingDeal(client, transactionId, referenceNumber, warnings);
-  const dealProperties = buildDealProperties(donation, destination);
-  const deal = await upsertDeal(client, existingDeal, dealProperties, mode, actions);
+  const resolvedContactId = contact.id ?? contactId;
+  const { deal: existingDeal, matchResult: dealMatchResult } = await findExistingDeal(
+    client,
+    donation,
+    resolvedContactId,
+    warnings,
+  );
+  const dealProperties = buildDealProperties(donation, destination, dealMatchResult);
+  const deal = await upsertDeal(client, existingDeal, dealMatchResult, dealProperties, mode, actions, warnings);
 
   if (mode === "write") {
     if (!contact.id || !deal.id) {
@@ -146,6 +163,7 @@ export async function processGivebutterDonation(
     destination,
     chapterCompanyId: chapterCompany?.id ?? null,
     donorCompany,
+    dealMatchResult: dealMatchResult ?? null,
     actions,
     warnings,
   };
@@ -175,6 +193,7 @@ export function buildContactProperties(
 export function buildDealProperties(
   donation: GivebutterDonation,
   destination: "Chapter" | "PORCH-Communities",
+  matchResult?: DealMatchResult | null,
 ): Record<string, string> {
   const eventDate = donation.createdAt ?? donation.transactedAt;
   const donorName = [donation.firstName, donation.lastName].filter(Boolean).join(" ").trim();
@@ -192,6 +211,19 @@ export function buildDealProperties(
     .filter(Boolean)
     .join(", ");
   const referenceNumber = asString(donation.transactionNumber);
+
+  // For new (unmatched) deals: set deal_match_status based on matchResult.
+  // For auto-closed matched deals: the status is set in upsertDeal to "auto_closed".
+  // For needs_review: the holding deal carries status + candidate pointer.
+  let dealMatchStatus: string | null = null;
+  let candidateDealId: string | null = null;
+
+  if (!matchResult) {
+    dealMatchStatus = "unprocessed";
+  } else if (matchResult.decision === "needs_review") {
+    dealMatchStatus = "needs_review";
+    candidateDealId = matchResult.candidate?.id ?? null;
+  }
 
   return compactProperties({
     dealname: dealName || `Givebutter Donation ${referenceNumber ?? ""}`.trim(),
@@ -215,6 +247,10 @@ export function buildDealProperties(
     givebutter_transaction_id: asString(donation.transactionId),
     hubspot_owner_id: PORCH_DONATION_OWNER_ID,
     destination,
+    deal_match_status: dealMatchStatus,
+    deal_match_score: matchResult ? String(matchResult.score) : null,
+    deal_match_signals: matchResult?.signals.join(",") ?? null,
+    candidate_deal_id: candidateDealId,
     referrer: donation.utm.referrer,
     utm_campaign: donation.utm.campaign,
     utm_content: donation.utm.content,
@@ -253,36 +289,71 @@ async function findExistingContact(
   return firstResult(byEmail, warnings, "email");
 }
 
+type ExistingDealLookup = {
+  deal: HubSpotDeal | null;
+  matchResult: DealMatchResult | null;
+};
+
 async function findExistingDeal(
   client: DonationParityClient,
-  transactionId: string | null,
-  referenceNumber: string | null,
+  donation: GivebutterDonation,
+  contactId: string | null,
   warnings: string[],
-): Promise<HubSpotDeal | null> {
+): Promise<ExistingDealLookup> {
+  const transactionId = asString(donation.transactionId);
+  const referenceNumber = asString(donation.transactionNumber);
+  const dealProperties = ["givebutter_transaction_id", "givebutter_reference_number", "pipeline", "dealstage", "amount"];
+
+  // Tier 1: idempotency key — exact Givebutter transaction ID.
   if (transactionId) {
     const byTransactionId = await client.searchDeals(
       "givebutter_transaction_id",
       transactionId,
-      ["givebutter_transaction_id", "givebutter_reference_number", "pipeline"],
+      dealProperties,
     );
     const match = firstResult(byTransactionId, warnings, "Givebutter Transaction ID");
 
     if (match) {
-      return match;
+      return { deal: match, matchResult: null };
     }
   }
 
+  // Tier 2: reference number fallback — but only within in-scope pipelines to avoid
+  // matching a staff-reclassified deal that Zapier previously stamped with a reference number.
   if (isNumericIdentifier(referenceNumber)) {
     const byReference = await client.searchDeals(
       "givebutter_reference_number",
       referenceNumber,
-      ["givebutter_transaction_id", "givebutter_reference_number", "pipeline"],
+      dealProperties,
     );
+    const match = firstResult(byReference, warnings, "Givebutter Reference Number");
 
-    return firstResult(byReference, warnings, "Givebutter Reference Number");
+    if (match) {
+      if (match.properties.pipeline && match.properties.pipeline in DEAL_MATCH_PIPELINES) {
+        return { deal: match, matchResult: null };
+      }
+
+      warnings.push(
+        `Existing deal ${match.id} (ref ${referenceNumber}) is in pipeline ${match.properties.pipeline}, which is not managed by this integration. Skipping to avoid overwriting a staff-managed deal.`,
+      );
+    }
   }
 
-  return null;
+  // Tier 3: pre-created deal matching by amount + contact + company.
+  const candidates = await findDealCandidates(client, contactId, donation);
+  const matchResult = findBestDealMatch(donation, candidates);
+
+  if (matchResult.decision === "auto_close" && matchResult.candidate) {
+    const deal = await client.searchDeals(
+      "hs_object_id",
+      matchResult.candidate.id,
+      dealProperties,
+    ).then((results) => results[0] ?? null);
+
+    return { deal, matchResult };
+  }
+
+  return { deal: null, matchResult: matchResult.decision !== "no_match" ? matchResult : null };
 }
 
 async function upsertContact(
@@ -312,17 +383,73 @@ async function upsertContact(
 async function upsertDeal(
   client: DonationParityClient,
   existing: HubSpotDeal | null,
+  matchResult: DealMatchResult | null,
   properties: Record<string, string>,
   mode: DonationParityMode,
   actions: string[],
+  warnings: string[],
 ): Promise<ObjectOutcome> {
   if (mode === "shadow") {
     const action = existing ? "would_update" : "would_create";
     actions.push(`${action}_deal`);
+
+    if (matchResult?.decision === "auto_close") {
+      actions.push("would_close_matched_deal_in_place");
+    } else if (matchResult?.decision === "needs_review") {
+      actions.push("would_create_needs_review_holding_deal");
+    }
+
     return { action, id: existing?.id ?? null };
   }
 
   if (existing) {
+    // Deal was found via the match engine (not an idempotency key hit): apply pipeline-aware update.
+    if (matchResult !== null) {
+      const existingPipeline = existing.properties.pipeline;
+
+      if (!existingPipeline || !(existingPipeline in DEAL_MATCH_PIPELINES)) {
+        warnings.push(
+          `Matched deal ${existing.id} is in unmanaged pipeline ${existingPipeline}; creating a new deal instead.`,
+        );
+        const created = await client.createDeal(properties);
+        actions.push("create_deal_pipeline_guard");
+        return { action: "create", id: created.id };
+      }
+
+      const pipelineConfig = DEAL_MATCH_PIPELINES[existingPipeline];
+      const updateProperties: Record<string, string> = {};
+
+      // Stamp Givebutter identity and key fields onto the pre-created deal.
+      if (properties.givebutter_transaction_id) {
+        updateProperties.givebutter_transaction_id = properties.givebutter_transaction_id;
+      }
+      if (properties.givebutter_reference_number) {
+        updateProperties.givebutter_reference_number = properties.givebutter_reference_number;
+      }
+      if (properties.amount) updateProperties.amount = properties.amount;
+      if (properties.closedate) updateProperties.closedate = properties.closedate;
+      if (properties.givebutter_campaign) updateProperties.givebutter_campaign = properties.givebutter_campaign;
+      if (properties.givebutter_company_name) updateProperties.givebutter_company_name = properties.givebutter_company_name;
+      if (properties.givebutter_message) updateProperties.givebutter_message = properties.givebutter_message;
+
+      if (matchResult.decision === "auto_close") {
+        // Close in the deal's own pipeline's closed stage — do not overwrite pipeline.
+        updateProperties.dealstage = pipelineConfig.closedStageId;
+        updateProperties.deal_match_status = "auto_closed";
+        if (matchResult.score !== undefined) {
+          updateProperties.deal_match_score = String(matchResult.score);
+        }
+        if (matchResult.signals.length > 0) {
+          updateProperties.deal_match_signals = matchResult.signals.join(",");
+        }
+      }
+
+      const updated = await client.updateDeal(existing.id, updateProperties);
+      actions.push("update_deal");
+      return { action: "update", id: updated.id };
+    }
+
+    // Deal was found via idempotency key: full property update (original behavior).
     const updateProperties = { ...properties };
     delete updateProperties.createdate;
     const updated = await client.updateDeal(existing.id, updateProperties);

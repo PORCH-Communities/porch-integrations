@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createHubSpotClient, HubSpotApiError } from "@/lib/hubspot/client";
+import { processDealMatchStatusChange } from "@/lib/hubspot/deal-confirmation";
 import {
   associateGivebutterDealToHousehold,
   processHouseholdStatusChange,
@@ -29,6 +30,7 @@ export async function GET() {
     endpoint: "/api/hubspot/webhook",
     subscriptions: [
       "contact.household_match_status property changes",
+      "deal.deal_match_status property changes",
       "deal creation",
       "deal-to-contact association additions",
     ],
@@ -77,7 +79,15 @@ export async function POST(request: Request) {
         .filter(Boolean),
     ),
   ];
-  const dealIds = [
+  const dealMatchStatusIds = [
+    ...new Set(
+      events
+        .filter(isDealMatchStatusEvent)
+        .map((event) => String(event.objectId))
+        .filter(Boolean),
+    ),
+  ];
+  const householdDealIds = [
     ...new Set(
       events
         .filter(isActionableDealEvent)
@@ -86,20 +96,25 @@ export async function POST(request: Request) {
     ),
   ];
 
-  if (contactIds.length === 0 && dealIds.length === 0) {
+  if (contactIds.length === 0 && dealMatchStatusIds.length === 0 && householdDealIds.length === 0) {
     return NextResponse.json({ ok: true, receivedAt, received: events.length, ignored: true });
   }
 
   try {
     const client = createHubSpotClient();
     const contactResults = [];
+    const dealMatchResults = [];
     const dealResults = [];
 
     for (const contactId of contactIds) {
       contactResults.push(await processHouseholdStatusChange(client, contactId));
     }
 
-    for (const dealId of dealIds) {
+    for (const dealId of dealMatchStatusIds) {
+      dealMatchResults.push(await processDealMatchStatusChange(client, dealId));
+    }
+
+    for (const dealId of householdDealIds) {
       dealResults.push(await associateGivebutterDealToHousehold(client, dealId));
     }
 
@@ -108,8 +123,9 @@ export async function POST(request: Request) {
         source: "hubspot-webhook",
         receivedAt,
         received: events.length,
-        processed: contactResults.length + dealResults.length,
+        processed: contactResults.length + dealMatchResults.length + dealResults.length,
         contactResults,
+        dealMatchResults,
         dealResults,
       }),
     );
@@ -118,8 +134,9 @@ export async function POST(request: Request) {
       ok: true,
       receivedAt,
       received: events.length,
-      processed: contactResults.length + dealResults.length,
+      processed: contactResults.length + dealMatchResults.length + dealResults.length,
       contactResults,
+      dealMatchResults,
       dealResults,
     });
   } catch (error) {
@@ -136,7 +153,7 @@ export async function POST(request: Request) {
     );
 
     return NextResponse.json(
-      { ok: false, error: "Household confirmation processing failed.", retryable },
+      { ok: false, error: "Webhook processing failed.", retryable },
       { status: retryable ? 503 : 500 },
     );
   }
@@ -150,6 +167,16 @@ function parseWebhookEvents(rawBody: string): HubSpotWebhookEvent[] | null {
   } catch {
     return null;
   }
+}
+
+function isDealMatchStatusEvent(event: HubSpotWebhookEvent): boolean {
+  return (
+    event.objectId !== undefined &&
+    event.objectTypeId === "0-3" &&
+    event.propertyName === "deal_match_status" &&
+    (event.subscriptionType === "object.propertyChange" ||
+      event.subscriptionType === "deal.propertyChange")
+  );
 }
 
 function isHouseholdStatusEvent(event: HubSpotWebhookEvent): boolean {

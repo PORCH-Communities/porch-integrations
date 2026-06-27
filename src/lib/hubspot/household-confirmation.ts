@@ -1,7 +1,5 @@
 import type { HubSpotClient } from "./client";
 
-const INDIVIDUAL_DONATIONS_PIPELINE_ID = "155504019";
-
 type HouseholdResolution =
   | { ok: true; companyId: string }
   | { ok: false; reason: string };
@@ -104,9 +102,19 @@ async function confirmLoadedContactHousehold(
   await client.associateContactToCompany(contactId, companyId);
 
   const contactDealIds = contact.associations?.deals?.results?.map(({ id }) => id) ?? [];
-  const contactDeals = await client.getDeals(contactDealIds);
+  const contactDeals = await client.getDeals(contactDealIds, [
+    "pipeline",
+    "givebutter_transaction_id",
+    "givebutter_reference_number",
+  ]);
+  // Associate any deal Vercel has touched (across all three in-scope pipelines),
+  // identified by the presence of a Givebutter idempotency key.
   const donationDealIds = contactDeals
-    .filter((deal) => deal.properties.pipeline === INDIVIDUAL_DONATIONS_PIPELINE_ID)
+    .filter(
+      (deal) =>
+        deal.properties.givebutter_transaction_id?.trim() ||
+        deal.properties.givebutter_reference_number?.trim(),
+    )
     .map((deal) => deal.id);
 
   await Promise.all(
@@ -127,16 +135,16 @@ export async function associateGivebutterDealToHousehold(
 ): Promise<DonationHouseholdResult> {
   const deal = await client.getDeal(dealId);
 
-  if (deal.properties.pipeline !== INDIVIDUAL_DONATIONS_PIPELINE_ID) {
+  const hasGivebutterKey =
+    deal.properties.givebutter_transaction_id?.trim() ||
+    deal.properties.givebutter_reference_number?.trim();
+
+  if (!hasGivebutterKey) {
     return {
       status: "ignored",
       dealId,
-      reason: "Deal is not in the Individual Donations pipeline.",
+      reason: "Deal has no Givebutter identifier (not a Vercel-created donation deal).",
     };
-  }
-
-  if (!deal.properties.givebutter_reference_number?.trim()) {
-    return { status: "ignored", dealId, reason: "Deal has no Givebutter reference number." };
   }
 
   const contactIds = uniqueIds(deal.associations?.contacts?.results);

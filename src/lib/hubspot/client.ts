@@ -47,7 +47,7 @@ export type HubSpotClient = {
   getContact(contactId: string): Promise<HubSpotContact>;
   getCompany(companyId: string): Promise<HubSpotCompany>;
   getDeal(dealId: string): Promise<HubSpotDeal>;
-  getDeals(dealIds: string[]): Promise<HubSpotDeal[]>;
+  getDeals(dealIds: string[], properties?: string[]): Promise<HubSpotDeal[]>;
   searchContacts(
     propertyName: string,
     value: string,
@@ -79,6 +79,9 @@ export type HubSpotClient = {
   associateDealToCompany(dealId: string, companyId: string): Promise<void>;
   getCompanyContactAssociations(companyId: string): Promise<HubSpotObjectAssociation[]>;
   getDealContactAssociations(dealId: string): Promise<HubSpotObjectAssociation[]>;
+  getDealCompanyAssociations(dealId: string): Promise<HubSpotObjectAssociation[]>;
+  updateDealProperties(dealId: string, properties: Record<string, string>): Promise<void>;
+  archiveDeal(dealId: string): Promise<void>;
 };
 
 export class HubSpotApiError extends Error {
@@ -217,14 +220,39 @@ export function createHubSpotClient(input?: {
     },
 
     getDeal(dealId) {
-      const properties = "pipeline,givebutter_reference_number";
+      const properties = [
+        "pipeline",
+        "dealstage",
+        "givebutter_reference_number",
+        "givebutter_transaction_id",
+        "deal_match_status",
+        "candidate_deal_id",
+        "deal_match_score",
+        "deal_match_signals",
+        "amount",
+        "closedate",
+        "givebutter_campaign",
+        "givebutter_company_name",
+        "givebutter_message",
+        "donor_address",
+        "dedication_name",
+        "dedication_type",
+        "dedication_recipient_name",
+        "dedication_recipient_email",
+        "referrer",
+        "utm_campaign",
+        "utm_content",
+        "utm_medium",
+        "utm_source",
+        "utm_term",
+      ].join(",");
 
       return request<HubSpotDeal>(
         `/crm/v3/objects/deals/${encodeURIComponent(dealId)}?properties=${properties}&associations=companies,contacts`,
       );
     },
 
-    async getDeals(dealIds) {
+    async getDeals(dealIds, properties) {
       if (dealIds.length === 0) {
         return [];
       }
@@ -234,7 +262,7 @@ export function createHubSpotClient(input?: {
         {
           method: "POST",
           body: JSON.stringify({
-            properties: ["pipeline"],
+            properties: properties ?? ["pipeline"],
             inputs: dealIds.map((id) => ({ id })),
           }),
         },
@@ -319,6 +347,27 @@ export function createHubSpotClient(input?: {
       );
 
       return response.results ?? [];
+    },
+
+    async getDealCompanyAssociations(dealId) {
+      const response = await request<{ results?: HubSpotObjectAssociation[] }>(
+        `/crm/v4/objects/deals/${encodeURIComponent(dealId)}/associations/companies?limit=500`,
+      );
+
+      return response.results ?? [];
+    },
+
+    async updateDealProperties(dealId, properties) {
+      await request(`/crm/v3/objects/deals/${encodeURIComponent(dealId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ properties }),
+      });
+    },
+
+    async archiveDeal(dealId) {
+      await request(`/crm/v3/objects/deals/${encodeURIComponent(dealId)}`, {
+        method: "DELETE",
+      });
     },
 
   };

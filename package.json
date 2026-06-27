@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "node --experimental-strip-types --test src/lib/householding/matching.test.mjs src/lib/hubspot/*.test.mjs",
     "givebutter:sample-transactions": "node --env-file=.env scripts/sample-givebutter-transactions.mjs",
-    "givebutter:reconcile": "node --experimental-strip-types --env-file=.env scripts/reconcile-givebutter-payloads.mjs"
+    "givebutter:reconcile": "node --experimental-strip-types --env-file=.env scripts/reconcile-givebutter-payloads.mjs",
+    "givebutter:historical-dry-run": "node --experimental-strip-types --env-file=.env scripts/historical-dry-run.mjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.4.1",

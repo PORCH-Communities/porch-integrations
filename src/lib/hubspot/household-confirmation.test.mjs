@@ -31,8 +31,8 @@ test("associates a confirmed contact and only Individual Donations deals", async
     async getDeals(ids) {
       calls.push(["getDeals", ids]);
       return [
-        { id: "donation-deal", properties: { pipeline: "155504019" } },
-        { id: "other-deal", properties: { pipeline: "other-pipeline" } },
+        { id: "donation-deal", properties: { pipeline: "155504019", givebutter_transaction_id: "txn-1", givebutter_reference_number: null } },
+        { id: "other-deal", properties: { pipeline: "other-pipeline", givebutter_transaction_id: null, givebutter_reference_number: null } },
       ];
     },
     async associateContactToCompany(contactId, companyId) {
@@ -271,28 +271,42 @@ test("ignores non-Givebutter and non-donation deals", async () => {
     },
   });
 
+  // No Givebutter identifier at all — ignore regardless of pipeline.
   assert.deepEqual(
     await associateGivebutterDealToHousehold(
-      makeClient({ pipeline: "155504019", givebutter_reference_number: null }),
+      makeClient({ pipeline: "155504019", givebutter_transaction_id: null, givebutter_reference_number: null }),
       "deal-no-reference",
     ),
     {
       status: "ignored",
       dealId: "deal-no-reference",
-      reason: "Deal has no Givebutter reference number.",
+      reason: "Deal has no Givebutter identifier (not a Vercel-created donation deal).",
     },
   );
-  assert.deepEqual(
-    await associateGivebutterDealToHousehold(
-      makeClient({ pipeline: "another-pipeline", givebutter_reference_number: "123" }),
-      "deal-wrong-pipeline",
-    ),
-    {
-      status: "ignored",
-      dealId: "deal-wrong-pipeline",
-      reason: "Deal is not in the Individual Donations pipeline.",
+
+  // A deal in any pipeline WITH a Givebutter key is now eligible (pipeline guard removed).
+  // It should reach contact lookup, not be silently ignored.
+  const clientWithContact = {
+    async getDeal(id) {
+      return {
+        id,
+        properties: { pipeline: "802960948", givebutter_transaction_id: null, givebutter_reference_number: "123" },
+        associations: { contacts: { results: [{ id: "contact-1" }] } },
+      };
     },
-  );
+    async getContact(id) {
+      // Contact has no confirmed household — so it falls through to "no confirmed contact" ignored.
+      return { id, properties: { household_match_status: "needs_review" }, associations: { companies: { results: [] } } };
+    },
+    async getCompany(id) {
+      return { id, properties: { record_type: "household" } };
+    },
+  };
+  const result = await associateGivebutterDealToHousehold(clientWithContact, "deal-grant-pipeline");
+  // contact-1 has no confirmed household, so it will be ignored (no confirmed contact)
+  assert.equal(result.status, "ignored");
+  assert.equal(result.dealId, "deal-grant-pipeline");
+  assert.ok(result.reason.includes("No associated contact has a confirmed household"));
 });
 
 test("does not recreate an existing household deal association", async () => {
