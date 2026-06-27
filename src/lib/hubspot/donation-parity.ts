@@ -1,4 +1,4 @@
-import { getFallbackEmail, type GivebutterDonation } from "../givebutter/payloads.ts";
+import type { GivebutterDonation } from "../givebutter/payloads.ts";
 import type {
   HubSpotClient,
   HubSpotCompany,
@@ -67,18 +67,19 @@ export async function processGivebutterDonation(
   const warnings: string[] = [];
   const transactionId = asString(donation.transactionId);
   const referenceNumber = asString(donation.transactionNumber);
-  const fallbackEmail = getFallbackEmail(donation);
+  const contactId = asString(donation.contactId);
+  const email = donation.email?.trim() || null;
 
   if (!transactionId && !referenceNumber) {
     return needsAttention(mode, donation, "Donation has no Givebutter transaction identifier.");
   }
 
-  if (!fallbackEmail) {
+  if (!contactId && !email) {
     return needsAttention(mode, donation, "Donation has neither an email nor a Givebutter Contact ID.");
   }
 
-  const existingContact = await findExistingContact(client, donation, fallbackEmail, warnings);
-  const contactProperties = buildContactProperties(donation, fallbackEmail);
+  const existingContact = await findExistingContact(client, donation, email, warnings);
+  const contactProperties = buildContactProperties(donation);
   const contact = await upsertContact(client, existingContact, contactProperties, mode, actions);
 
   const chapterCompany = await findFirstCompany(
@@ -152,10 +153,9 @@ export async function processGivebutterDonation(
 
 export function buildContactProperties(
   donation: GivebutterDonation,
-  fallbackEmail = getFallbackEmail(donation),
 ): Record<string, string> {
   return compactProperties({
-    email: fallbackEmail,
+    email: donation.email,
     address: donation.address.line1,
     city: donation.address.city,
     state: donation.address.state,
@@ -167,7 +167,6 @@ export function buildContactProperties(
     givebutter_contact_id: asString(donation.contactId),
     mobilephone: donation.phone,
     phone: donation.phone,
-    closedate: donation.createdAt ?? donation.transactedAt,
     hs_latest_source: "DIRECT_TRAFFIC",
     hubspot_owner_id: PORCH_DONATION_OWNER_ID,
   });
@@ -181,13 +180,14 @@ export function buildDealProperties(
   const donorName = [donation.firstName, donation.lastName].filter(Boolean).join(" ").trim();
   const amount = donation.amount === null ? null : String(donation.amount);
   const dealName = [`$${amount ?? ""}`, donorName].filter(Boolean).join(" ").trim();
-  const campaign = [donation.campaignTitle, donation.campaignCode].filter(Boolean).join(" ").trim();
+  const campaign =
+    donation.campaignTitle && donation.campaignCode
+      ? `${donation.campaignTitle}-${donation.campaignCode}`
+      : (donation.campaignTitle ?? donation.campaignCode ?? "");
   const donorAddress = [
     donation.address.line1,
-    donation.address.line2,
     donation.address.city,
-    donation.address.state,
-    donation.address.postalCode,
+    [donation.address.state, donation.address.postalCode].filter(Boolean).join(" "),
   ]
     .filter(Boolean)
     .join(", ");
@@ -227,7 +227,7 @@ export function buildDealProperties(
 async function findExistingContact(
   client: DonationParityClient,
   donation: GivebutterDonation,
-  fallbackEmail: string,
+  email: string | null,
   warnings: string[],
 ): Promise<HubSpotContact | null> {
   const contactId = asString(donation.contactId);
@@ -244,10 +244,11 @@ async function findExistingContact(
     }
   }
 
-  const byEmail = await client.searchContacts("email", fallbackEmail, [
-    "email",
-    "givebutter_contact_id",
-  ]);
+  if (!email) {
+    return null;
+  }
+
+  const byEmail = await client.searchContacts("email", email, ["email", "givebutter_contact_id"]);
 
   return firstResult(byEmail, warnings, "email");
 }

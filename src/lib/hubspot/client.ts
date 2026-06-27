@@ -78,6 +78,7 @@ export type HubSpotClient = {
   associateContactToCompany(contactId: string, companyId: string): Promise<void>;
   associateDealToCompany(dealId: string, companyId: string): Promise<void>;
   getCompanyContactAssociations(companyId: string): Promise<HubSpotObjectAssociation[]>;
+  getDealContactAssociations(dealId: string): Promise<HubSpotObjectAssociation[]>;
 };
 
 export class HubSpotApiError extends Error {
@@ -311,6 +312,15 @@ export function createHubSpotClient(input?: {
 
       return response.results ?? [];
     },
+
+    async getDealContactAssociations(dealId) {
+      const response = await request<{ results?: HubSpotObjectAssociation[] }>(
+        `/crm/v4/objects/deals/${encodeURIComponent(dealId)}/associations/contacts?limit=500`,
+      );
+
+      return response.results ?? [];
+    },
+
   };
 }
 

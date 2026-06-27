@@ -18,7 +18,6 @@ test("builds the audited contact and deal field mappings", () => {
   const donation = makeDonation({ email: null });
 
   assert.deepEqual(buildContactProperties(donation), {
-    email: "contact-123@porchcommunities.org",
     address: "123 Main Street",
     city: "Chapel Hill",
     state: "NC",
@@ -30,7 +29,6 @@ test("builds the audited contact and deal field mappings", () => {
     givebutter_contact_id: "contact-123",
     mobilephone: "9195550123",
     phone: "9195550123",
-    closedate: "2026-06-27T12:00:00.000Z",
     hs_latest_source: "DIRECT_TRAFFIC",
     hubspot_owner_id: "807444275",
   });
@@ -49,8 +47,8 @@ test("builds the audited contact and deal field mappings", () => {
     dedication_recipient_name: "Recipient Name",
     dedication_type: "In honor of",
     description: "3240015459",
-    donor_address: "123 Main Street, Apt 2, Chapel Hill, NC, 27516",
-    givebutter_campaign: "PORCH Chapel Hill ABC123",
+    donor_address: "123 Main Street, Chapel Hill, NC 27516",
+    givebutter_campaign: "PORCH Chapel Hill-ABC123",
     givebutter_company_name: "Example Employer",
     givebutter_message: "Thank you",
     givebutter_reference_number: "3240015459",
@@ -64,6 +62,35 @@ test("builds the audited contact and deal field mappings", () => {
     utm_source: "newsletter",
     utm_term: "donate",
   });
+});
+
+test("processes an offline gift without synthetic email or mailing address", async () => {
+  const calls = [];
+  const client = makeClient(calls);
+  const donation = makeDonation({
+    email: null,
+    isOffline: true,
+    paymentMethod: "check",
+    address: {
+      company: null,
+      line1: null,
+      line2: null,
+      city: null,
+      state: null,
+      postalCode: null,
+      country: null,
+    },
+    companyName: null,
+  });
+
+  const result = await processGivebutterDonation(client, donation, "write");
+  const createContactCall = calls.find(([name]) => name === "createContact");
+
+  assert.equal(result.status, "processed");
+  assert.ok(createContactCall);
+  assert.equal("email" in createContactCall[1], false);
+  assert.equal("address" in createContactCall[1], false);
+  assert.equal(createContactCall[1].givebutter_contact_id, "contact-123");
 });
 
 test("shadow mode performs lookups and reports the full chapter path without writes", async () => {
