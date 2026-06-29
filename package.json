@@ -7,10 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test src/lib/householding/matching.test.mjs src/lib/hubspot/*.test.mjs",
+    "test": "node --experimental-strip-types --test src/lib/householding/matching.test.mjs src/lib/givebutter/*.test.mjs src/lib/hubspot/*.test.mjs",
     "givebutter:sample-transactions": "node --env-file=.env scripts/sample-givebutter-transactions.mjs",
     "givebutter:reconcile": "node --experimental-strip-types --env-file=.env scripts/reconcile-givebutter-payloads.mjs",
-    "givebutter:historical-dry-run": "node --experimental-strip-types --env-file=.env scripts/historical-dry-run.mjs"
+    "givebutter:historical-dry-run": "node --experimental-strip-types --env-file=.env scripts/historical-dry-run.mjs",
+    "household:test-matching": "node --experimental-strip-types --env-file=.env scripts/test-household-matching.mjs",
+    "household:analyze-clusters": "node --experimental-strip-types --env-file=.env scripts/analyze-household-clusters.mjs --md docs/household-cluster-analysis.md"
   },
   "dependencies": {
     "@vercel/blob": "^2.4.1",

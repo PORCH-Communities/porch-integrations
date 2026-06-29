@@ -3,13 +3,13 @@ import { createHmac, type BinaryLike } from "node:crypto";
 import { secureEqual } from "../crypto.ts";
 
 const SIGNATURE_HEADERS = [
-  "signature",
   "x-givebutter-signature",
   "givebutter-signature",
   "x-givebutter-webhook-signature",
 ];
 
 const SECRET_HEADERS = [
+  "signature",
   "x-givebutter-webhook-secret",
   "givebutter-webhook-secret",
 ];
@@ -28,12 +28,12 @@ export function verifyGivebutterWebhookSecret(
     return { ok: false, reason: "missing_config" };
   }
 
-  for (const headerName of SECRET_HEADERS) {
-    const providedSecret = headers.get(headerName);
+  const providedSecrets = SECRET_HEADERS.map((headerName) => headers.get(headerName)).filter(
+    (providedSecret): providedSecret is string => Boolean(providedSecret),
+  );
 
-    if (providedSecret && secureEqual(providedSecret, configuredSecret)) {
-      return { ok: true, method: "shared_secret" };
-    }
+  if (providedSecrets.some((providedSecret) => secureEqual(providedSecret, configuredSecret))) {
+    return { ok: true, method: "shared_secret" };
   }
 
   const signatures = SIGNATURE_HEADERS.flatMap((headerName) =>
@@ -41,7 +41,10 @@ export function verifyGivebutterWebhookSecret(
   );
 
   if (signatures.length === 0) {
-    return { ok: false, reason: "missing_signature" };
+    return {
+      ok: false,
+      reason: providedSecrets.length > 0 ? "invalid_signature" : "missing_signature",
+    };
   }
 
   const expectedSignatures = getSecretKeyCandidates(configuredSecret).flatMap((secretKey) => [
@@ -122,4 +125,3 @@ function decodeBase64Secret(secret: string): Buffer | null {
     return null;
   }
 }
-

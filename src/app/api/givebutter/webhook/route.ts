@@ -24,7 +24,7 @@ export async function GET() {
     ok: true,
     endpoint: "/api/givebutter/webhook",
     mode,
-    events: ["transaction.succeeded", "campaign.created", "campaign.updated"],
+    events: ["transaction.succeeded", "refund.created", "campaign.created", "campaign.updated"],
   });
 }
 
@@ -136,6 +136,33 @@ export async function POST(request: Request) {
         { status: retryable ? 503 : 500 },
       );
     }
+  }
+
+  if (event === "refund.created") {
+    const persistedPayload = await persistPayloadLog({
+      receivedAt,
+      event,
+      rawBody,
+      summary: { captured: true },
+    });
+
+    console.log(
+      JSON.stringify({
+        source: "givebutter-webhook",
+        receivedAt,
+        event,
+        verifiedBy: verification.method,
+        persistedPayload,
+        note: "payload captured for future reconciliation — no HubSpot changes made",
+      }),
+    );
+
+    return NextResponse.json({
+      ok: true,
+      receivedAt,
+      event,
+      captured: true,
+    });
   }
 
   if (event === "campaign.created" || event === "campaign.updated") {
