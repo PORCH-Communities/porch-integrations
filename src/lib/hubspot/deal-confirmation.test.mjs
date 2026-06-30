@@ -1,7 +1,44 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { processDealMatchStatusChange } from "./deal-confirmation.ts";
+import {
+  processDealMatchStatusChange,
+  processDealReviewAction,
+} from "./deal-confirmation.ts";
+
+test("direct Create New Deal action processes a needs-review deal", async () => {
+  const calls = [];
+  const client = makeClient(calls, {
+    async getDeal(id) {
+      return makeDeal(id, { deal_match_status: "needs_review" });
+    },
+  });
+
+  const result = await processDealReviewAction(
+    client,
+    "holding-deal-1",
+    "create_new_deal",
+  );
+
+  assert.equal(result.status, "rejected");
+  assert.ok(calls.some(([name]) => name === "updateDealProperties"));
+});
+
+test("direct review action refuses deals that are no longer awaiting review", async () => {
+  const client = makeClient([], {
+    async getDeal(id) {
+      return makeDeal(id, { deal_match_status: "no_match" });
+    },
+  });
+
+  const result = await processDealReviewAction(
+    client,
+    "holding-deal-1",
+    "create_new_deal",
+  );
+
+  assert.equal(result.status, "ignored_not_actionable");
+});
 
 // ─── processDealMatchStatusChange routing ────────────────────────────────────
 

@@ -37,6 +37,74 @@ export type DonationHouseholdResult =
       reason: string;
     };
 
+export type HouseholdReviewAction =
+  | "match_existing_household"
+  | "save_new_household"
+  | "no_household";
+
+export async function processHouseholdReviewAction(
+  client: HubSpotClient,
+  contactId: string,
+  action: HouseholdReviewAction,
+): Promise<HouseholdStatusResult> {
+  const contact = await client.getContact(contactId);
+
+  if (contact.properties.household_match_status !== "needs_review") {
+    return {
+      status: "ignored_not_actionable",
+      contactId,
+      reason: "Contact is no longer awaiting household review.",
+    };
+  }
+
+  if (action === "no_household") {
+    await client.updateContactProperties(contactId, {
+      household_match_status: "no_match",
+      suggested_household_match: "",
+      household_match_score: "",
+    });
+    return { status: "review_fields_cleared", contactId };
+  }
+
+  if (action === "save_new_household") {
+    const lastName = contact.properties.lastname?.trim();
+    if (!lastName) {
+      return { status: "needs_attention", contactId, reason: "Contact has no last name." };
+    }
+
+    const companyProperties = compactProperties({
+      name: `${lastName} Household`,
+      envelope_name: `The ${lastName} Family`,
+      record_type: "household",
+      address: contact.properties.address,
+      city: contact.properties.city,
+      state: contact.properties.state,
+      zip: contact.properties.zip,
+    });
+    const company = await client.createCompany(companyProperties);
+    await client.associateContactToCompany(contactId, company.id);
+    await client.updateContactProperties(contactId, {
+      household_match_status: "confirmed",
+      suggested_household_match: `${company.id} | ${companyProperties.name}`,
+    });
+    return confirmContactHousehold(client, contactId);
+  }
+
+  const companyId = parseSuggestedHouseholdCompanyId(
+    contact.properties.suggested_household_match,
+  );
+  if (!companyId) {
+    return { status: "needs_attention", contactId, reason: "No suggested Household is selected." };
+  }
+  const company = await client.getCompany(companyId);
+  if (company.properties.record_type !== "household") {
+    return { status: "needs_attention", contactId, reason: "Suggested company is not a Household." };
+  }
+
+  await client.updateContactProperties(contactId, { household_match_status: "confirmed" });
+  return confirmContactHousehold(client, contactId);
+}
+
 export async function processHouseholdStatusChange(
   client: HubSpotClient,
   contactId: string,
@@ -246,4 +314,12 @@ function uniqueIds(results?: Array<{ id: string }>): string[] {
 
 export function parseSuggestedHouseholdCompanyId(value?: string | null): string | null {
   return value?.trim().match(/^(\d+)\b/)?.[1] ?? null;
+}
+
+function compactProperties(
+  properties: Record<string, string | null | undefined>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(properties).filter((entry): entry is [string, string] => Boolean(entry[1]?.trim())),
+  );
 }

@@ -59,6 +59,28 @@ export type DealConfirmationResult =
       reason: string;
     };
 
+export type DealReviewAction = "match_candidate" | "create_new_deal";
+
+export async function processDealReviewAction(
+  client: ConfirmationClient,
+  dealId: string,
+  action: DealReviewAction,
+): Promise<DealConfirmationResult> {
+  const deal = await client.getDeal(dealId);
+
+  if (deal.properties.deal_match_status !== "needs_review") {
+    return {
+      status: "ignored_not_actionable",
+      dealId,
+      reason: `Deal is not awaiting review: ${deal.properties.deal_match_status ?? "empty"}.`,
+    };
+  }
+
+  return action === "match_candidate"
+    ? confirmDealMatch(client, deal, ["needs_review"])
+    : rejectDealMatch(client, deal);
+}
+
 export async function processDealMatchStatusChange(
   client: ConfirmationClient,
   dealId: string,
@@ -67,7 +89,7 @@ export async function processDealMatchStatusChange(
   const status = deal.properties.deal_match_status;
 
   if (status === "confirmed") {
-    return confirmDealMatch(client, deal);
+    return confirmDealMatch(client, deal, ["confirmed"]);
   }
 
   if (status === "no_match") {
@@ -84,10 +106,11 @@ export async function processDealMatchStatusChange(
 async function confirmDealMatch(
   client: ConfirmationClient,
   holdingDeal: Awaited<ReturnType<HubSpotClient["getDeal"]>>,
+  allowedStatuses: string[],
 ): Promise<DealConfirmationResult> {
   const holdingDealId = holdingDeal.id;
 
-  if (holdingDeal.properties.deal_match_status !== "confirmed") {
+  if (!allowedStatuses.includes(holdingDeal.properties.deal_match_status ?? "")) {
     return {
       status: "ignored_not_actionable",
       dealId: holdingDealId,

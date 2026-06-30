@@ -206,7 +206,18 @@ export function createHubSpotClient(input?: {
 
   return {
     getContact(contactId) {
-      const properties = "household_match_status,suggested_household_match";
+      const properties = [
+        "household_match_status",
+        "suggested_household_match",
+        "household_match_score",
+        "firstname",
+        "lastname",
+        "email",
+        "address",
+        "city",
+        "state",
+        "zip",
+      ].join(",");
 
       return request<HubSpotContact>(
         `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=${properties}&associations=companies,deals`,
