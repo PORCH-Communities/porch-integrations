@@ -40,14 +40,43 @@ export type DonationHouseholdResult =
 export type HouseholdReviewAction =
   | "match_existing_household"
   | "save_new_household"
-  | "no_household";
+  | "no_household"
+  | "confirm_household";
 
 export async function processHouseholdReviewAction(
   client: HubSpotClient,
   contactId: string,
   action: HouseholdReviewAction,
+  companyId?: string,
 ): Promise<HouseholdStatusResult> {
   const contact = await client.getContact(contactId);
+
+  if (action === "confirm_household") {
+    if (!companyId) {
+      return { status: "needs_attention", contactId, reason: "confirm_household requires a companyId." };
+    }
+    const company = await client.getCompany(companyId);
+    if (company.properties.record_type !== "household") {
+      return { status: "needs_attention", contactId, reason: "Specified company is not a Household." };
+    }
+    // Disassociate from all other household companies, keep the chosen one.
+    const allCompanyIds = uniqueIds(contact.associations?.companies?.results);
+    const otherHouseholds = await Promise.all(
+      allCompanyIds.filter((id) => id !== companyId).map((id) => client.getCompany(id)),
+    );
+    for (const other of otherHouseholds) {
+      if (other.properties.record_type === "household") {
+        await client.disassociateContactFromCompany(contactId, other.id);
+      }
+    }
+    await client.associateContactToCompany(contactId, companyId);
+    await client.updateContactProperties(contactId, {
+      household_match_status: "confirmed",
+      suggested_household_match: `${companyId} | ${company.properties.name ?? ""}`,
+      household_match_score: "",
+    });
+    return confirmContactHousehold(client, contactId);
+  }
 
   if (contact.properties.household_match_status !== "needs_review") {
     return {
@@ -90,14 +119,14 @@ export async function processHouseholdReviewAction(
     return confirmContactHousehold(client, contactId);
   }
 
-  const companyId = parseSuggestedHouseholdCompanyId(
+  const suggestedCompanyId = parseSuggestedHouseholdCompanyId(
     contact.properties.suggested_household_match,
   );
-  if (!companyId) {
+  if (!suggestedCompanyId) {
     return { status: "needs_attention", contactId, reason: "No suggested Household is selected." };
   }
-  const company = await client.getCompany(companyId);
-  if (company.properties.record_type !== "household") {
+  const suggestedCompany = await client.getCompany(suggestedCompanyId);
+  if (suggestedCompany.properties.record_type !== "household") {
     return { status: "needs_attention", contactId, reason: "Suggested company is not a Household." };
   }
 

@@ -13,6 +13,7 @@ const ACTIONS = new Set<HouseholdReviewAction>([
   "match_existing_household",
   "save_new_household",
   "no_household",
+  "confirm_household",
 ]);
 
 export async function POST(request: Request) {
@@ -29,17 +30,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
   }
 
-  let body: { contactId?: unknown; action?: unknown } | null = null;
+  let body: { contactId?: unknown; action?: unknown; companyId?: unknown } | null = null;
   try { body = JSON.parse(rawBody); } catch { /* handled below */ }
   const contactId = typeof body?.contactId === "string" ? body.contactId.trim() : "";
   const action = body?.action;
+  const companyId = typeof body?.companyId === "string" ? body.companyId.trim() : undefined;
   if (!contactId || typeof action !== "string" || !ACTIONS.has(action as HouseholdReviewAction)) {
     return NextResponse.json({ ok: false, error: "contactId and a valid action are required." }, { status: 400 });
   }
 
   try {
     const result = await processHouseholdReviewAction(
-      createHubSpotClient(), contactId, action as HouseholdReviewAction,
+      createHubSpotClient(), contactId, action as HouseholdReviewAction, companyId,
     );
     const ok = result.status === "associated" || result.status === "review_fields_cleared";
     console.log(JSON.stringify({ source: "household-review-action", contactId, action, result }));

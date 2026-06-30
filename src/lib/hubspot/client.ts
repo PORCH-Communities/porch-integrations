@@ -76,6 +76,7 @@ export type HubSpotClient = {
     associationTypeId: number,
   ): Promise<void>;
   associateContactToCompany(contactId: string, companyId: string): Promise<void>;
+  disassociateContactFromCompany(contactId: string, companyId: string): Promise<void>;
   associateDealToCompany(dealId: string, companyId: string): Promise<void>;
   getCompanyContactAssociations(companyId: string): Promise<HubSpotObjectAssociation[]>;
   getDealContactAssociations(dealId: string): Promise<HubSpotObjectAssociation[]>;
@@ -341,6 +342,13 @@ export function createHubSpotClient(input?: {
       await request(
         `/crm/v4/objects/contacts/${encodeURIComponent(contactId)}/associations/default/companies/${encodeURIComponent(companyId)}`,
         { method: "PUT" },
+      );
+    },
+
+    async disassociateContactFromCompany(contactId, companyId) {
+      await request(
+        `/crm/v4/objects/contacts/${encodeURIComponent(contactId)}/associations/companies/${encodeURIComponent(companyId)}`,
+        { method: "DELETE" },
       );
     },
 
