@@ -230,8 +230,6 @@ export function buildContactProperties(
     givebutter_contact_id: asString(donation.contactId),
     mobilephone: donation.phone,
     phone: donation.phone,
-    hs_latest_source: "INTEGRATION",
-    hs_analytics_source: "INTEGRATION",
     hubspot_owner_id: PORCH_DONATION_OWNER_ID,
   });
 }

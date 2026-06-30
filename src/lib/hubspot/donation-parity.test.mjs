@@ -29,8 +29,6 @@ test("builds the audited contact and deal field mappings", () => {
     givebutter_contact_id: "contact-123",
     mobilephone: "9195550123",
     phone: "9195550123",
-    hs_latest_source: "INTEGRATION",
-    hs_analytics_source: "INTEGRATION",
     hubspot_owner_id: "94752409",
   });
 
