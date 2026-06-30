@@ -197,6 +197,7 @@ async function rejectDealMatch(
     deal_match_score: "",
     deal_match_signals: "",
     candidate_deal_id: "",
+    candidate_deal_url: "",
     suppress_automated_communications: keepSuppressed ? "true" : "",
   });
 

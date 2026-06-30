@@ -25,6 +25,7 @@ import {
 export const INDIVIDUAL_DONATIONS_PIPELINE_ID = "155504019";
 export const DONATION_COMPLETE_STAGE_ID = "261678424";
 export const CLOSED_WON_FORECAST_CATEGORY = "CLOSED";
+const HUBSPOT_PORTAL_ID = process.env.HUBSPOT_PORTAL_ID ?? "46366899";
 
 export const PORCH_DONATION_OWNER_ID =
   process.env.HUBSPOT_OWNER_ID ?? "94752409";
@@ -300,6 +301,9 @@ export function buildDealProperties(
     deal_match_score: matchResult ? String(matchResult.score) : null,
     deal_match_signals: matchResult?.signals.join(",") ?? null,
     candidate_deal_id: candidateDealId,
+    candidate_deal_url: candidateDealId
+      ? `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-3/${candidateDealId}`
+      : null,
     referrer: donation.utm.referrer,
     utm_campaign: donation.utm.campaign,
     utm_content: donation.utm.content,

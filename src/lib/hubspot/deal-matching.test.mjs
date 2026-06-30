@@ -195,6 +195,18 @@ test("DEAL_MATCH_PIPELINES contains Individual Donations, Grant, and Sponsorship
 
 // ─── findDealCandidates ───────────────────────────────────────────────────────
 
+test("skips pre-created deal matching for donations at or below $1,000", async () => {
+  const calls = [];
+  const candidates = await findDealCandidates(
+    makeClient(calls),
+    "contact-1",
+    makeDonation({ amount: 1000 }),
+  );
+
+  assert.deepEqual(candidates, []);
+  assert.deepEqual(calls, []);
+});
+
 test("returns candidates from both contact association and amount passes, deduplicated", async () => {
   const calls = [];
 
@@ -207,19 +219,19 @@ test("returns candidates from both contact association and amount passes, dedupl
     },
     async getDeals(ids) {
       calls.push(["getDeals", ids]);
-      return ids.map((id) => makeRawDeal({ id, pipeline: "155504019", dealstage: "1135728530", amount: "500" }));
+      return ids.map((id) => makeRawDeal({ id, pipeline: "155504019", dealstage: "1135728530", amount: "1500" }));
     },
     async searchDeals(prop, value) {
       calls.push(["searchDeals", prop, value]);
       // amount search returns deal-B (dup) and a new deal-C
       return [
-        makeRawDeal({ id: "deal-B", pipeline: "155504019", dealstage: "1135728530", amount: "500" }),
-        makeRawDeal({ id: "deal-C", pipeline: "802960948", dealstage: "1331736913", amount: "500" }),
+        makeRawDeal({ id: "deal-B", pipeline: "155504019", dealstage: "1135728530", amount: "1500" }),
+        makeRawDeal({ id: "deal-C", pipeline: "802960948", dealstage: "1331736913", amount: "1500" }),
       ];
     },
   });
 
-  const candidates = await findDealCandidates(client, "contact-1", makeDonation({ amount: 500, companyName: null }));
+  const candidates = await findDealCandidates(client, "contact-1", makeDonation({ amount: 1500, companyName: null }));
 
   // Should have deal-A, deal-B (deduped), deal-C
   assert.equal(candidates.length, 3);
@@ -238,14 +250,14 @@ test("skips deals in pipelines not in DEAL_MATCH_PIPELINES", async () => {
     },
     async getDeals() {
       // Out-of-scope pipeline
-      return [makeRawDeal({ id: "deal-out-of-scope", pipeline: "153712251", dealstage: "1141642914", amount: "500" })];
+      return [makeRawDeal({ id: "deal-out-of-scope", pipeline: "153712251", dealstage: "1141642914", amount: "1500" })];
     },
     async searchDeals() {
       return [];
     },
   });
 
-  const candidates = await findDealCandidates(client, "contact-1", makeDonation({ amount: 500, companyName: null }));
+  const candidates = await findDealCandidates(client, "contact-1", makeDonation({ amount: 1500, companyName: null }));
   assert.equal(candidates.length, 0);
 });
 
@@ -257,14 +269,14 @@ test("skips deals already stamped with a givebutter_transaction_id", async () =>
       return [];
     },
     async getDeals() {
-      return [makeRawDeal({ id: "deal-already-done", pipeline: "155504019", dealstage: "1135728530", amount: "500", txnId: "existing-txn" })];
+      return [makeRawDeal({ id: "deal-already-done", pipeline: "155504019", dealstage: "1135728530", amount: "1500", txnId: "existing-txn" })];
     },
     async searchDeals() {
       return [];
     },
   });
 
-  const candidates = await findDealCandidates(client, "contact-1", makeDonation({ amount: 500, companyName: null }));
+  const candidates = await findDealCandidates(client, "contact-1", makeDonation({ amount: 1500, companyName: null }));
   assert.equal(candidates.length, 0);
 });
 
@@ -276,12 +288,12 @@ test("sets contactAssociated=true when deal is linked to the contact", async () 
       return [];
     },
     async getDeals() {
-      return [makeRawDeal({ id: "deal-A", pipeline: "155504019", dealstage: "1135728530", amount: "500" })];
+      return [makeRawDeal({ id: "deal-A", pipeline: "155504019", dealstage: "1135728530", amount: "1500" })];
     },
     async searchDeals() { return []; },
   });
 
-  const candidates = await findDealCandidates(client, "contact-1", makeDonation({ amount: 500, companyName: null }));
+  const candidates = await findDealCandidates(client, "contact-1", makeDonation({ amount: 1500, companyName: null }));
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].contactAssociated, true);
 });
@@ -291,7 +303,7 @@ test("sets companyMatched=true when a deal company name matches donation.company
     async getDealContactAssociations() { return []; },
     async getDeals() { return []; },
     async searchDeals() {
-      return [makeRawDeal({ id: "deal-A", pipeline: "802960948", dealstage: "1331736913", amount: "1000" })];
+      return [makeRawDeal({ id: "deal-A", pipeline: "802960948", dealstage: "1331736913", amount: "1500" })];
     },
     async getDealCompanyAssociations() {
       return [{ toObjectId: "company-1" }];
@@ -301,7 +313,7 @@ test("sets companyMatched=true when a deal company name matches donation.company
     },
   });
 
-  const candidates = await findDealCandidates(client, null, makeDonation({ amount: 1000, companyName: "Acme Corp" }));
+  const candidates = await findDealCandidates(client, null, makeDonation({ amount: 1500, companyName: "Acme Corp" }));
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].companyMatched, true);
 });

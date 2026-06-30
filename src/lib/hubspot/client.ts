@@ -233,6 +233,7 @@ export function createHubSpotClient(input?: {
         "suppress_automated_communications",
         "deal_match_status",
         "candidate_deal_id",
+        "candidate_deal_url",
         "deal_match_score",
         "deal_match_signals",
         "amount",

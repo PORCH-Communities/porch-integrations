@@ -273,6 +273,7 @@ test("rejectDealMatch promotes holding deal to Individual Donations and clears m
   assert.equal(props.dealstage, "261678424");
   assert.equal(props.deal_match_status, "no_match");
   assert.equal(props.candidate_deal_id, "");
+  assert.equal(props.candidate_deal_url, "");
   assert.equal(props.deal_match_score, "");
   assert.equal(props.deal_match_signals, "");
 });

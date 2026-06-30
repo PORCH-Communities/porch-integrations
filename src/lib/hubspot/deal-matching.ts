@@ -40,6 +40,9 @@ const AUTO_CLOSE_SCORE = Number(process.env.DEAL_MATCH_AUTO_CLOSE_SCORE ?? "80")
 const NEEDS_REVIEW_SCORE = Number(process.env.DEAL_MATCH_NEEDS_REVIEW_SCORE ?? "40");
 const AMBIGUITY_MARGIN = Number(process.env.DEAL_MATCH_AMBIGUITY_MARGIN ?? "15");
 const MAX_CANDIDATES = Number(process.env.DEAL_MATCH_MAX_CANDIDATES ?? "20");
+const MIN_PRECREATED_DEAL_AMOUNT = Number(
+  process.env.DEAL_MATCH_MIN_PRECREATED_AMOUNT ?? "1000",
+);
 
 const DEAL_CANDIDATE_PROPERTIES = [
   "pipeline",
@@ -151,6 +154,15 @@ export async function findDealCandidates(
   contactId: string | null,
   donation: GivebutterDonation,
 ): Promise<DealCandidate[]> {
+  // Staff do not normally pre-create smaller gifts. Skipping Tier 3 here avoids
+  // noisy amount-only reviews while preserving earlier exact-ID and plan-ID tiers.
+  if (
+    donation.amount !== null &&
+    donation.amount <= MIN_PRECREATED_DEAL_AMOUNT
+  ) {
+    return [];
+  }
+
   const candidateMap = new Map<string, HubSpotDeal>();
 
   // Pass 1: open deals already associated to this contact.

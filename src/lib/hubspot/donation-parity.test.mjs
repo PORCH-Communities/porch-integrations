@@ -65,6 +65,29 @@ test("builds the audited contact and deal field mappings", () => {
   });
 });
 
+test("buildDealProperties adds a clickable candidate deal URL for review", () => {
+  const props = buildDealProperties(makeDonation({ amount: 1500 }), "Chapter", {
+    candidate: {
+      id: "123456789",
+      pipeline: "802960948",
+      dealstage: "1331736913",
+      amount: "1500",
+      planId: null,
+      contactAssociated: false,
+      companyMatched: false,
+    },
+    decision: "needs_review",
+    score: 50,
+    signals: ["amount"],
+  });
+
+  assert.equal(props.candidate_deal_id, "123456789");
+  assert.equal(
+    props.candidate_deal_url,
+    "https://app.hubspot.com/contacts/46366899/record/0-3/123456789",
+  );
+});
+
 test("processes an offline gift without synthetic email or mailing address", async () => {
   const calls = [];
   const client = makeClient(calls);
