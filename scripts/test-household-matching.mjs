@@ -19,7 +19,6 @@ import { writeFileSync } from "node:fs";
 import { createHubSpotClient } from "../src/lib/hubspot/client.ts";
 import {
   findBestHouseholdMatch,
-  normalizeLastName,
   normalizeStreet,
   normalizeZip,
 } from "../src/lib/householding/matching.ts";
@@ -94,7 +93,7 @@ async function fetchAllHouseholdCompanies(client) {
     const response = await hubspotSearch(client, "companies", {
       filterGroups: [
         {
-          filters: [{ propertyName: "record_type", operator: "EQ", value: "Household" }],
+          filters: [{ propertyName: "record_type", operator: "EQ", value: "household" }],
         },
       ],
       properties: COMPANY_PROPERTIES,
@@ -203,7 +202,7 @@ async function main() {
   if (candidates.length === 0) {
     process.stderr.write(
       "No Household companies found. Nothing to match against.\n" +
-      "Create at least one Company with record_type = Household to use this script.\n",
+      "Create at least one Company with record_type = household to use this script.\n",
     );
     process.exit(0);
   }

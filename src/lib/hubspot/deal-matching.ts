@@ -162,7 +162,7 @@ export async function findDealCandidates(
       const contactDeals = await client.getDeals(contactDealIds, DEAL_CANDIDATE_PROPERTIES);
 
       for (const deal of contactDeals) {
-        if (isEligibleCandidate(deal)) {
+        if (isEligibleDealCandidate(deal)) {
           candidateMap.set(deal.id, deal);
         }
       }
@@ -178,7 +178,7 @@ export async function findDealCandidates(
     );
 
     for (const deal of amountDeals) {
-      if (isEligibleCandidate(deal) && !candidateMap.has(deal.id)) {
+      if (isEligibleDealCandidate(deal) && !candidateMap.has(deal.id)) {
         candidateMap.set(deal.id, deal);
       }
     }
@@ -241,7 +241,7 @@ async function resolveCandidateSignals(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function isEligibleCandidate(deal: HubSpotDeal): boolean {
+export function isEligibleDealCandidate(deal: HubSpotDeal): boolean {
   const pipeline = deal.properties.pipeline;
   const stage = deal.properties.dealstage;
 

@@ -9,11 +9,22 @@ import {
   DEAL_MATCH_PIPELINES,
   findDealCandidates,
   findBestDealMatch,
+  isEligibleDealCandidate,
   type DealMatchResult,
 } from "./deal-matching.ts";
+import {
+  processDonationHouseholdMatch,
+  type HouseholdProcessingResult,
+} from "./household-matching.ts";
+import {
+  buildRecurringDealProperties,
+  resolveRecurringCommunication,
+  type RecurringCommunicationResult,
+} from "./recurring-gifts.ts";
 
 export const INDIVIDUAL_DONATIONS_PIPELINE_ID = "155504019";
 export const DONATION_COMPLETE_STAGE_ID = "261678424";
+export const CLOSED_WON_FORECAST_CATEGORY = "CLOSED";
 
 export const PORCH_DONATION_OWNER_ID =
   process.env.HUBSPOT_OWNER_ID ?? "94752409";
@@ -41,6 +52,7 @@ type DonationParityClient = Pick<
   | "createCompany"
   | "createDeal"
   | "updateContact"
+  | "updateContactProperties"
   | "updateDeal"
   | "associateContactToDeal"
   | "associateContactToDealWithType"
@@ -67,6 +79,8 @@ export type DonationParityResult = {
   chapterCompanyId?: string | null;
   donorCompany?: ObjectOutcome | null;
   dealMatchResult?: DealMatchResult | null;
+  householdMatchResult?: HouseholdProcessingResult | null;
+  recurringCommunication?: RecurringCommunicationResult | null;
   actions: string[];
   warnings: string[];
   reason?: string;
@@ -116,13 +130,19 @@ export async function processGivebutterDonation(
   }
 
   const resolvedContactId = contact.id ?? contactId;
+  const recurringCommunication = await resolveRecurringCommunication(client, donation);
   const { deal: existingDeal, matchResult: dealMatchResult } = await findExistingDeal(
     client,
     donation,
     resolvedContactId,
     warnings,
   );
-  const dealProperties = buildDealProperties(donation, destination, dealMatchResult);
+  const dealProperties = buildDealProperties(
+    donation,
+    destination,
+    dealMatchResult,
+    recurringCommunication,
+  );
   const deal = await upsertDeal(client, existingDeal, dealMatchResult, dealProperties, mode, actions, warnings);
 
   if (mode === "write") {
@@ -162,6 +182,20 @@ export async function processGivebutterDonation(
     warnings,
   );
 
+  const householdMatchResult = await processDonationHouseholdMatch(client, {
+    donation,
+    contactId: contact.id,
+    dealId: deal.id,
+    existingStatus: existingContact?.properties.household_match_status,
+    mode,
+  });
+
+  if (householdMatchResult.status === "matched") {
+    actions.push(`household_${householdMatchResult.match.decision}`);
+  } else {
+    actions.push("skip_household_matching");
+  }
+
   return {
     status: mode === "write" ? "processed" : "shadowed",
     mode,
@@ -173,6 +207,8 @@ export async function processGivebutterDonation(
     chapterCompanyId: chapterCompany?.id ?? null,
     donorCompany,
     dealMatchResult: dealMatchResult ?? null,
+    householdMatchResult,
+    recurringCommunication,
     actions,
     warnings,
   };
@@ -204,6 +240,7 @@ export function buildDealProperties(
   donation: GivebutterDonation,
   destination: "Chapter" | "PORCH-Communities",
   matchResult?: DealMatchResult | null,
+  recurringCommunication: RecurringCommunicationResult | null = null,
 ): Record<string, string> {
   const eventDate = donation.createdAt ?? donation.transactedAt;
   const donorName = [donation.firstName, donation.lastName].filter(Boolean).join(" ").trim();
@@ -235,10 +272,14 @@ export function buildDealProperties(
     candidateDealId = matchResult.candidate?.id ?? null;
   }
 
+  const recurringProperties = buildRecurringDealProperties(recurringCommunication);
+  const suppressHoldingDeal = matchResult?.decision === "needs_review";
+
   return compactProperties({
     dealname: dealName || `Givebutter Donation ${referenceNumber ?? ""}`.trim(),
     pipeline: INDIVIDUAL_DONATIONS_PIPELINE_ID,
     dealstage: DONATION_COMPLETE_STAGE_ID,
+    hs_manual_forecast_category: CLOSED_WON_FORECAST_CATEGORY,
     amount,
     chapter_city: donation.address.city,
     chapter_state: donation.address.state,
@@ -269,6 +310,11 @@ export function buildDealProperties(
     utm_term: donation.utm.term,
     givebutter_plan_id: asString(donation.planId),
     givebutter_is_recurring: donation.isRecurring ? "true" : null,
+    ...recurringProperties,
+    suppress_automated_communications:
+      suppressHoldingDeal || recurringProperties.suppress_automated_communications === "true"
+        ? "true"
+        : null,
   });
 }
 
@@ -284,6 +330,7 @@ async function findExistingContact(
     const byGivebutterId = await client.searchContacts("givebutter_contact_id", contactId, [
       "email",
       "givebutter_contact_id",
+      "household_match_status",
     ]);
     const match = firstResult(byGivebutterId, warnings, "Givebutter Contact ID");
 
@@ -296,7 +343,11 @@ async function findExistingContact(
     return null;
   }
 
-  const byEmail = await client.searchContacts("email", email, ["email", "givebutter_contact_id"]);
+  const byEmail = await client.searchContacts("email", email, [
+    "email",
+    "givebutter_contact_id",
+    "household_match_status",
+  ]);
 
   return firstResult(byEmail, warnings, "email");
 }
@@ -358,15 +409,26 @@ async function findExistingDeal(
 
   if (planId && donation.isRecurring) {
     const byPlanId = await client.searchDeals("givebutter_plan_id", planId, dealProperties);
-    const openPlanDeal = byPlanId.find(
-      (d) =>
-        d.properties.pipeline &&
-        d.properties.pipeline in DEAL_MATCH_PIPELINES &&
-        !d.properties.givebutter_transaction_id?.trim(),
-    );
+    const openPlanDeal = byPlanId.find(isEligibleDealCandidate);
 
     if (openPlanDeal) {
-      return { deal: openPlanDeal, matchResult: null };
+      return {
+        deal: openPlanDeal,
+        matchResult: {
+          candidate: {
+            id: openPlanDeal.id,
+            pipeline: openPlanDeal.properties.pipeline ?? "",
+            dealstage: openPlanDeal.properties.dealstage ?? "",
+            amount: openPlanDeal.properties.amount ?? null,
+            planId: openPlanDeal.properties.givebutter_plan_id?.trim() || null,
+            contactAssociated: false,
+            companyMatched: false,
+          },
+          decision: "auto_close",
+          score: 120,
+          signals: ["plan_id"],
+        },
+      };
     }
   }
 
@@ -462,6 +524,12 @@ async function upsertDeal(
       if (properties.givebutter_campaign) updateProperties.givebutter_campaign = properties.givebutter_campaign;
       if (properties.givebutter_company_name) updateProperties.givebutter_company_name = properties.givebutter_company_name;
       if (properties.givebutter_message) updateProperties.givebutter_message = properties.givebutter_message;
+      if (properties.givebutter_plan_id) updateProperties.givebutter_plan_id = properties.givebutter_plan_id;
+      if (properties.givebutter_is_recurring) updateProperties.givebutter_is_recurring = properties.givebutter_is_recurring;
+      if (properties.recurring_communication_type) updateProperties.recurring_communication_type = properties.recurring_communication_type;
+      if (properties.recurring_anniversary_number) updateProperties.recurring_anniversary_number = properties.recurring_anniversary_number;
+      if (properties.recurring_plan_start_date) updateProperties.recurring_plan_start_date = properties.recurring_plan_start_date;
+      if (properties.suppress_automated_communications) updateProperties.suppress_automated_communications = properties.suppress_automated_communications;
 
       if (matchResult.decision === "auto_close") {
         // Close in the deal's own pipeline's closed stage — do not overwrite pipeline.

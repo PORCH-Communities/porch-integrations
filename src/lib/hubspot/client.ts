@@ -157,7 +157,7 @@ export function createHubSpotClient(input?: {
           },
         ],
         properties,
-        limit: 10,
+        limit: 100,
       }),
     });
 
@@ -225,6 +225,12 @@ export function createHubSpotClient(input?: {
         "dealstage",
         "givebutter_reference_number",
         "givebutter_transaction_id",
+        "givebutter_plan_id",
+        "givebutter_is_recurring",
+        "recurring_communication_type",
+        "recurring_anniversary_number",
+        "recurring_plan_start_date",
+        "suppress_automated_communications",
         "deal_match_status",
         "candidate_deal_id",
         "deal_match_score",

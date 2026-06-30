@@ -11,6 +11,7 @@
     "givebutter:sample-transactions": "node --env-file=.env scripts/sample-givebutter-transactions.mjs",
     "givebutter:reconcile": "node --experimental-strip-types --env-file=.env scripts/reconcile-givebutter-payloads.mjs",
     "givebutter:historical-dry-run": "node --experimental-strip-types --env-file=.env scripts/historical-dry-run.mjs",
+    "givebutter:backfill-recurring": "node --experimental-strip-types --env-file=.env scripts/backfill-recurring-deals.mjs",
     "household:test-matching": "node --experimental-strip-types --env-file=.env scripts/test-household-matching.mjs",
     "household:analyze-clusters": "node --experimental-strip-types --env-file=.env scripts/analyze-household-clusters.mjs --md docs/household-cluster-analysis.md"
   },

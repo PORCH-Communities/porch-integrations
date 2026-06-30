@@ -95,6 +95,12 @@ test("copies Givebutter fields to candidate and closes it in its own pipeline st
           amount: "10000",
           closedate: "2026-06-16",
           givebutter_campaign: "My Campaign-D909XF",
+          givebutter_plan_id: "plan-123",
+          givebutter_is_recurring: "true",
+          recurring_communication_type: "anniversary",
+          recurring_anniversary_number: "2",
+          recurring_plan_start_date: "2024-06-16",
+          suppress_automated_communications: "true",
           deal_match_score: "90",
           deal_match_signals: "contact_association,amount",
         });
@@ -132,6 +138,16 @@ test("copies Givebutter fields to candidate and closes it in its own pipeline st
   assert.equal(updateCall[2].deal_match_status, "auto_closed");
   assert.equal(updateCall[2].givebutter_transaction_id, "txn-xyz");
   assert.equal(updateCall[2].amount, "10000");
+  assert.equal(updateCall[2].givebutter_plan_id, "plan-123");
+  assert.equal(updateCall[2].givebutter_is_recurring, "true");
+  assert.equal(updateCall[2].recurring_communication_type, "anniversary");
+  assert.equal(updateCall[2].recurring_anniversary_number, "2");
+  assert.equal(updateCall[2].recurring_plan_start_date, "2024-06-16");
+  assert.equal(
+    "suppress_automated_communications" in updateCall[2],
+    false,
+    "review-only suppression is not copied to an anniversary candidate",
+  );
 
   // re-associate contact
   const assocContact = calls.find(
@@ -261,6 +277,23 @@ test("rejectDealMatch promotes holding deal to Individual Donations and clears m
   assert.equal(props.deal_match_signals, "");
 });
 
+test("keeps routine recurring installments suppressed when rejecting a holding match", async () => {
+  const calls = [];
+  const client = makeClient(calls, {
+    async getDeal(id) {
+      return makeDeal(id, {
+        deal_match_status: "no_match",
+        recurring_communication_type: "suppressed",
+      });
+    },
+  });
+
+  await processDealMatchStatusChange(client, "holding-1");
+
+  const updateCall = calls.find((c) => c[0] === "updateDealProperties");
+  assert.equal(updateCall[2].suppress_automated_communications, "true");
+});
+
 // ─── Factories ────────────────────────────────────────────────────────────────
 
 function makeDeal(id, properties = {}) {
@@ -291,6 +324,12 @@ function makeDeal(id, properties = {}) {
       utm_medium: null,
       utm_source: null,
       utm_term: null,
+      givebutter_plan_id: null,
+      givebutter_is_recurring: null,
+      recurring_communication_type: null,
+      recurring_anniversary_number: null,
+      recurring_plan_start_date: null,
+      suppress_automated_communications: null,
       ...properties,
     },
   };

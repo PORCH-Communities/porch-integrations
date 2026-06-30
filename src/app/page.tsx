@@ -6,8 +6,8 @@ const workflows = [
   },
   {
     name: "Household matching engine",
-    status: "Planned",
-    nextStep: "Move Zapier Code matching logic into /api/match-household.",
+    status: "Implemented locally",
+    nextStep: "Deploy the transaction-flow integration and run a controlled live canary.",
   },
   {
     name: "Framer to HubSpot form processing",

@@ -29,14 +29,16 @@ test("builds the audited contact and deal field mappings", () => {
     givebutter_contact_id: "contact-123",
     mobilephone: "9195550123",
     phone: "9195550123",
-    hs_latest_source: "DIRECT_TRAFFIC",
-    hubspot_owner_id: "807444275",
+    hs_latest_source: "INTEGRATION",
+    hs_analytics_source: "INTEGRATION",
+    hubspot_owner_id: "94752409",
   });
 
   assert.deepEqual(buildDealProperties(donation, "Chapter"), {
     dealname: "$125 Jamie Donor",
     pipeline: "155504019",
     dealstage: "261678424",
+    hs_manual_forecast_category: "CLOSED",
     amount: "125",
     chapter_city: "Chapel Hill",
     chapter_state: "NC",
@@ -53,7 +55,7 @@ test("builds the audited contact and deal field mappings", () => {
     givebutter_message: "Thank you",
     givebutter_reference_number: "3240015459",
     givebutter_transaction_id: "txn-token",
-    hubspot_owner_id: "807444275",
+    hubspot_owner_id: "94752409",
     destination: "Chapter",
     deal_match_status: "unprocessed",
     referrer: "https://example.org",
@@ -161,6 +163,60 @@ test("write mode creates the PORCH Communities path and donor-company associatio
   assert.equal(calls.some(([name]) => name === "associateContactToDealWithType"), false);
 });
 
+test("write mode runs household matching and associates a strong candidate", async () => {
+  const calls = [];
+  const household = {
+    id: "household-1",
+    properties: {
+      name: "Donor Household",
+      record_type: "household",
+      address: "123 Main St",
+      zip: "27516",
+      email: null,
+    },
+  };
+  const client = makeClient(calls, {
+    async searchCompanies(propertyName, value) {
+      calls.push(["searchCompanies", propertyName, value]);
+
+      if (
+        (propertyName === "name" && value === "Donor Household") ||
+        (propertyName === "address" && value === "123 Main Street")
+      ) {
+        return [household];
+      }
+
+      return [];
+    },
+  });
+
+  const result = await processGivebutterDonation(
+    client,
+    makeDonation({ companyName: null }),
+    "write",
+  );
+
+  assert.equal(result.householdMatchResult?.status, "matched");
+  assert.equal(result.householdMatchResult?.match.decision, "auto_household");
+  assert.ok(result.actions.includes("household_auto_household"));
+  assert.ok(
+    calls.some(
+      ([name, contactId, companyId]) =>
+        name === "associateContactToCompany" &&
+        contactId === "contact-created" &&
+        companyId === "household-1",
+    ),
+  );
+  assert.ok(
+    calls.some(
+      ([name, dealId, companyId]) =>
+        name === "associateDealToCompany" &&
+        dealId === "deal-created" &&
+        companyId === "household-1",
+    ),
+  );
+});
+
 test("a retried chapter donation updates existing records and reapplies idempotent associations", async () => {
   const calls = [];
   const client = makeClient(calls, {
@@ -255,6 +311,9 @@ function makeClient(calls, overrides = {}) {
     async updateContact(id, properties) {
       calls.push(["updateContact", id, properties]);
       return { id, properties };
+    },
+    async updateContactProperties(id, properties) {
+      calls.push(["updateContactProperties", id, properties]);
     },
     async updateDeal(id, properties) {
       calls.push(["updateDeal", id, properties]);
@@ -387,8 +446,8 @@ test("Tier 1.5 matches an open pre-created deal carrying the same plan_id", asyn
           {
             id: "pre-created-plan-deal",
             properties: {
-              pipeline: "155504019",
-              dealstage: "261678420",
+              pipeline: "802960948",
+              dealstage: "1331736913",
               amount: "25",
               givebutter_transaction_id: null,
               givebutter_reference_number: null,
@@ -416,7 +475,17 @@ test("Tier 1.5 matches an open pre-created deal carrying the same plan_id", asyn
   assert.equal(result.deal?.action, "update");
 
   const planSearches = calls.filter(([name, prop]) => name === "searchDeals" && prop === "givebutter_plan_id");
-  assert.equal(planSearches.length, 1);
+  assert.equal(planSearches.length, 2, "classification and Tier 1.5 each load the plan");
+
+  const updateCall = calls.find(
+    ([name, id]) => name === "updateDeal" && id === "pre-created-plan-deal",
+  );
+  assert.ok(updateCall);
+  assert.equal(updateCall[2].dealstage, "1363931741", "closes in the Grant pipeline");
+  assert.equal("pipeline" in updateCall[2], false, "does not move the matched deal");
+  assert.equal(updateCall[2].givebutter_plan_id, "plan-h9g");
+  assert.equal(updateCall[2].givebutter_is_recurring, "true");
+  assert.equal(updateCall[2].recurring_communication_type, "initial");
 });
 
 test("Tier 1.5 is skipped when donation is not recurring", async () => {

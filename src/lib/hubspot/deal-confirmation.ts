@@ -5,6 +5,11 @@ import { DEAL_MATCH_PIPELINES } from "./deal-matching.ts";
 const GIVEBUTTER_FIELDS_TO_COPY = [
   "givebutter_transaction_id",
   "givebutter_reference_number",
+  "givebutter_plan_id",
+  "givebutter_is_recurring",
+  "recurring_communication_type",
+  "recurring_anniversary_number",
+  "recurring_plan_start_date",
   "givebutter_campaign",
   "givebutter_company_name",
   "givebutter_message",
@@ -140,6 +145,13 @@ async function confirmDealMatch(
   updateProperties.dealstage = pipelineConfig.closedStageId;
   updateProperties.deal_match_status = "auto_closed";
 
+  // Holding deals are always suppressed while staff reviews them. Preserve
+  // suppression only for routine recurring installments; initial and
+  // anniversary messages become eligible when the real candidate is closed.
+  if (holdingDeal.properties.recurring_communication_type === "suppressed") {
+    updateProperties.suppress_automated_communications = "true";
+  }
+
   await client.updateDeal(candidateDealId, updateProperties);
 
   // Re-associate the holding deal's contacts and companies to the candidate deal.
@@ -175,6 +187,9 @@ async function rejectDealMatch(
   const holdingDealId = holdingDeal.id;
 
   // Promote the holding deal to a standalone donation record.
+  const keepSuppressed =
+    holdingDeal.properties.recurring_communication_type === "suppressed";
+
   await client.updateDealProperties(holdingDealId, {
     pipeline: "155504019",        // Individual Donations
     dealstage: "261678424",       // Donation Complete
@@ -182,6 +197,7 @@ async function rejectDealMatch(
     deal_match_score: "",
     deal_match_signals: "",
     candidate_deal_id: "",
+    suppress_automated_communications: keepSuppressed ? "true" : "",
   });
 
   return { status: "rejected", holdingDealId };
