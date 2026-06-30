@@ -7,6 +7,10 @@ import {
   summarizeGivebutterCampaignPayload,
   summarizeGivebutterDonationPayload,
 } from "@/lib/givebutter/payloads";
+import {
+  mapGivebutterRefund,
+  summarizeGivebutterRefundPayload,
+} from "@/lib/givebutter/refund-payload";
 import { createHubSpotClient, HubSpotApiError } from "@/lib/hubspot/client";
 import {
   getDonationParityMode,
@@ -139,11 +143,13 @@ export async function POST(request: Request) {
   }
 
   if (event === "refund.created") {
+    const refund = mapGivebutterRefund(payload);
+    const summary = summarizeGivebutterRefundPayload(refund, payload);
     const persistedPayload = await persistPayloadLog({
       receivedAt,
       event,
       rawBody,
-      summary: { captured: true },
+      summary,
     });
 
     console.log(
@@ -152,6 +158,7 @@ export async function POST(request: Request) {
         receivedAt,
         event,
         verifiedBy: verification.method,
+        summary,
         persistedPayload,
         note: "payload captured for future reconciliation — no HubSpot changes made",
       }),

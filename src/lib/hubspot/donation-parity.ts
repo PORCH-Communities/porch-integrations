@@ -14,10 +14,19 @@ import {
 
 export const INDIVIDUAL_DONATIONS_PIPELINE_ID = "155504019";
 export const DONATION_COMPLETE_STAGE_ID = "261678424";
-export const PORCH_DONATION_OWNER_ID = "807444275";
-export const CHAPTER_FINANCIAL_DONOR_ASSOCIATION_TYPE_ID = 11;
-export const COMPANY_DONATION_CONTACT_ASSOCIATION_TYPE_ID = 3;
-export const CHAPTER_DONATION_CONTACT_ASSOCIATION_TYPE_ID = 12;
+
+export const PORCH_DONATION_OWNER_ID =
+  process.env.HUBSPOT_OWNER_ID ?? "94752409";
+
+export const CHAPTER_FINANCIAL_DONOR_ASSOCIATION_TYPE_ID = Number(
+  process.env.HUBSPOT_ASSOC_FINANCIAL_DONOR ?? "11",
+);
+export const COMPANY_DONATION_CONTACT_ASSOCIATION_TYPE_ID = Number(
+  process.env.HUBSPOT_ASSOC_CHAPTER_LEAD_LOOKUP ?? "3",
+);
+export const CHAPTER_DONATION_CONTACT_ASSOCIATION_TYPE_ID = Number(
+  process.env.HUBSPOT_ASSOC_CHAPTER_DONATION_CONTACT ?? "12",
+);
 
 export type DonationParityMode = "shadow" | "write";
 
@@ -185,7 +194,8 @@ export function buildContactProperties(
     givebutter_contact_id: asString(donation.contactId),
     mobilephone: donation.phone,
     phone: donation.phone,
-    hs_latest_source: "DIRECT_TRAFFIC",
+    hs_latest_source: "INTEGRATION",
+    hs_analytics_source: "INTEGRATION",
     hubspot_owner_id: PORCH_DONATION_OWNER_ID,
   });
 }
@@ -257,6 +267,8 @@ export function buildDealProperties(
     utm_medium: donation.utm.medium,
     utm_source: donation.utm.source,
     utm_term: donation.utm.term,
+    givebutter_plan_id: asString(donation.planId),
+    givebutter_is_recurring: donation.isRecurring ? "true" : null,
   });
 }
 
@@ -302,7 +314,7 @@ async function findExistingDeal(
 ): Promise<ExistingDealLookup> {
   const transactionId = asString(donation.transactionId);
   const referenceNumber = asString(donation.transactionNumber);
-  const dealProperties = ["givebutter_transaction_id", "givebutter_reference_number", "pipeline", "dealstage", "amount"];
+  const dealProperties = ["givebutter_transaction_id", "givebutter_reference_number", "givebutter_plan_id", "pipeline", "dealstage", "amount"];
 
   // Tier 1: idempotency key — exact Givebutter transaction ID.
   if (transactionId) {
@@ -336,6 +348,25 @@ async function findExistingDeal(
       warnings.push(
         `Existing deal ${match.id} (ref ${referenceNumber}) is in pipeline ${match.properties.pipeline}, which is not managed by this integration. Skipping to avoid overwriting a staff-managed deal.`,
       );
+    }
+  }
+
+  // Tier 1.5: plan ID — when an open pre-created deal was already stamped with this recurring
+  // plan's ID (staff pre-created it for the series), prefer it at full confidence over scoring.
+  // Only match against open deals to avoid re-closing an already-processed installment.
+  const planId = asString(donation.planId);
+
+  if (planId && donation.isRecurring) {
+    const byPlanId = await client.searchDeals("givebutter_plan_id", planId, dealProperties);
+    const openPlanDeal = byPlanId.find(
+      (d) =>
+        d.properties.pipeline &&
+        d.properties.pipeline in DEAL_MATCH_PIPELINES &&
+        !d.properties.givebutter_transaction_id?.trim(),
+    );
+
+    if (openPlanDeal) {
+      return { deal: openPlanDeal, matchResult: null };
     }
   }
 

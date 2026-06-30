@@ -302,6 +302,7 @@ function makeDonation(overrides = {}) {
     transactionId: "txn-token",
     transactionNumber: "3240015459",
     contactId: "contact-123",
+    planId: null,
     donorType: "person",
     firstName: "Jamie",
     lastName: "Donor",
@@ -349,3 +350,124 @@ function makeDonation(overrides = {}) {
     ...overrides,
   };
 }
+
+// ─── Recurring gift field mapping ─────────────────────────────────────────────
+
+test("buildDealProperties sets givebutter_plan_id and givebutter_is_recurring on a recurring gift", () => {
+  const donation = makeDonation({ isRecurring: true, planId: "plan-abc123" });
+  const props = buildDealProperties(donation, "PORCH-Communities");
+
+  assert.equal(props.givebutter_plan_id, "plan-abc123");
+  assert.equal(props.givebutter_is_recurring, "true");
+});
+
+test("buildDealProperties omits recurring fields on a one-time gift", () => {
+  const props = buildDealProperties(makeDonation({ isRecurring: false, planId: null }), "PORCH-Communities");
+
+  assert.equal("givebutter_plan_id" in props, false);
+  assert.equal("givebutter_is_recurring" in props, false);
+});
+
+test("buildDealProperties includes planId but omits givebutter_is_recurring when planId present but isRecurring false", () => {
+  const props = buildDealProperties(makeDonation({ isRecurring: false, planId: "plan-xyz" }), "PORCH-Communities");
+
+  assert.equal(props.givebutter_plan_id, "plan-xyz");
+  assert.equal("givebutter_is_recurring" in props, false);
+});
+
+// ─── Tier 1.5: plan_id match ──────────────────────────────────────────────────
+
+test("Tier 1.5 matches an open pre-created deal carrying the same plan_id", async () => {
+  const calls = [];
+  const client = makeClient(calls, {
+    async searchDeals(propertyName, value) {
+      calls.push(["searchDeals", propertyName, value]);
+      if (propertyName === "givebutter_plan_id") {
+        return [
+          {
+            id: "pre-created-plan-deal",
+            properties: {
+              pipeline: "155504019",
+              dealstage: "261678420",
+              amount: "25",
+              givebutter_transaction_id: null,
+              givebutter_reference_number: null,
+              givebutter_plan_id: "plan-h9g",
+            },
+          },
+        ];
+      }
+      return [];
+    },
+  });
+
+  const donation = makeDonation({
+    isRecurring: true,
+    planId: "plan-h9g",
+    transactionId: "txn-new-installment",
+    transactionNumber: null,
+    amount: 25,
+  });
+
+  const result = await processGivebutterDonation(client, donation, "write");
+
+  assert.equal(result.status, "processed");
+  assert.equal(result.deal?.id, "pre-created-plan-deal");
+  assert.equal(result.deal?.action, "update");
+
+  const planSearches = calls.filter(([name, prop]) => name === "searchDeals" && prop === "givebutter_plan_id");
+  assert.equal(planSearches.length, 1);
+});
+
+test("Tier 1.5 is skipped when donation is not recurring", async () => {
+  const calls = [];
+  const client = makeClient(calls);
+
+  await processGivebutterDonation(
+    client,
+    makeDonation({ isRecurring: false, planId: "plan-h9g", transactionId: "txn-one-time" }),
+    "shadow",
+  );
+
+  const planSearches = calls.filter(([name, prop]) => name === "searchDeals" && prop === "givebutter_plan_id");
+  assert.equal(planSearches.length, 0, "should not search by plan_id for a non-recurring gift");
+});
+
+test("Tier 1.5 skips a plan-deal that already has a transaction_id (prior installment)", async () => {
+  const calls = [];
+  const client = makeClient(calls, {
+    async searchDeals(propertyName, value) {
+      calls.push(["searchDeals", propertyName, value]);
+      if (propertyName === "givebutter_plan_id") {
+        return [
+          {
+            id: "already-processed-deal",
+            properties: {
+              pipeline: "155504019",
+              dealstage: "261678424",
+              amount: "25",
+              givebutter_transaction_id: "txn-prior-installment",
+              givebutter_reference_number: null,
+              givebutter_plan_id: "plan-h9g",
+            },
+          },
+        ];
+      }
+      return [];
+    },
+  });
+
+  const donation = makeDonation({
+    isRecurring: true,
+    planId: "plan-h9g",
+    transactionId: "txn-new-installment",
+    transactionNumber: null,
+    amount: 25,
+  });
+
+  const result = await processGivebutterDonation(client, donation, "write");
+
+  // Tier 1.5 must skip the already-processed deal and fall through to create a new one
+  assert.equal(result.deal?.action, "create");
+  assert.notEqual(result.deal?.id, "already-processed-deal");
+});

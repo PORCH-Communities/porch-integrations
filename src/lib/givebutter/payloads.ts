@@ -11,6 +11,7 @@ export type GivebutterDonation = {
   transactionId: string | number | null;
   transactionNumber: string | number | null;
   contactId: string | number | null;
+  planId: string | number | null;
   donorType: "person" | "organization" | "unknown";
   firstName: string | null;
   lastName: string | null;
@@ -109,6 +110,7 @@ export function mapGivebutterDonation(payload: GivebutterWebhookPayload): Givebu
     transactionId: firstId(data.id),
     transactionNumber: firstId(data.number, firstTransaction.id),
     contactId: firstId(data.contact_id),
+    planId: firstId(data.plan_id, firstTransaction.plan_id),
     donorType: getDonorType({ companyName, firstName, lastName }),
     firstName,
     lastName,
@@ -194,6 +196,7 @@ export function summarizeGivebutterDonationPayload(
     transactionId: hasValue(donation.transactionId),
     transactionNumber: hasValue(donation.transactionNumber),
     contactId: hasValue(donation.contactId),
+    planId: hasValue(donation.planId),
     email: hasValue(donation.email),
     donorName: hasValue(donation.firstName) || hasValue(donation.lastName),
     amount: hasValue(donation.amount),

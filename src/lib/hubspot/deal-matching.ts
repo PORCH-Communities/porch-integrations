@@ -36,16 +36,17 @@ const ALL_CLOSED_STAGES = new Set([
   "1186687810", // Sponsorships: Closed Lost
 ]);
 
-const AUTO_CLOSE_SCORE = 80;
-const NEEDS_REVIEW_SCORE = 40;
-const AMBIGUITY_MARGIN = 15;
-const MAX_CANDIDATES = 20;
+const AUTO_CLOSE_SCORE = Number(process.env.DEAL_MATCH_AUTO_CLOSE_SCORE ?? "80");
+const NEEDS_REVIEW_SCORE = Number(process.env.DEAL_MATCH_NEEDS_REVIEW_SCORE ?? "40");
+const AMBIGUITY_MARGIN = Number(process.env.DEAL_MATCH_AMBIGUITY_MARGIN ?? "15");
+const MAX_CANDIDATES = Number(process.env.DEAL_MATCH_MAX_CANDIDATES ?? "20");
 
 const DEAL_CANDIDATE_PROPERTIES = [
   "pipeline",
   "dealstage",
   "amount",
   "givebutter_transaction_id",
+  "givebutter_plan_id",
 ];
 
 export type DealCandidate = {
@@ -53,6 +54,7 @@ export type DealCandidate = {
   pipeline: string;
   dealstage: string;
   amount: string | null;
+  planId: string | null;
   contactAssociated: boolean;
   companyMatched: boolean;
 };
@@ -231,6 +233,7 @@ async function resolveCandidateSignals(
     pipeline: deal.properties.pipeline ?? "",
     dealstage: deal.properties.dealstage ?? "",
     amount: deal.properties.amount ?? null,
+    planId: deal.properties.givebutter_plan_id?.trim() || null,
     contactAssociated,
     companyMatched,
   };

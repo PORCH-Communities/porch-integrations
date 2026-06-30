@@ -313,6 +313,7 @@ function makeDonation(overrides = {}) {
     transactionId: "txn-1",
     transactionNumber: "1234567890",
     contactId: "contact-1",
+    planId: null,
     donorType: "person",
     firstName: "Jamie",
     lastName: "Donor",
@@ -347,13 +348,14 @@ function makeCandidate(overrides = {}) {
     pipeline: "155504019",
     dealstage: "1135728530",
     amount: "500",
+    planId: null,
     contactAssociated: false,
     companyMatched: false,
     ...overrides,
   };
 }
 
-function makeRawDeal({ id, pipeline, dealstage, amount, txnId = null } = {}) {
+function makeRawDeal({ id, pipeline, dealstage, amount, txnId = null, planId = null } = {}) {
   return {
     id,
     properties: {
@@ -361,6 +363,7 @@ function makeRawDeal({ id, pipeline, dealstage, amount, txnId = null } = {}) {
       dealstage,
       amount,
       givebutter_transaction_id: txnId,
+      givebutter_plan_id: planId,
     },
   };
 }
