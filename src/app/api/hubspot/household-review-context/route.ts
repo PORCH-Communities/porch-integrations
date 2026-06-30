@@ -37,14 +37,16 @@ export async function POST(request: Request) {
     const households = await Promise.all(
       householdCompanies.map(async (company) => {
         const associations = await client.getCompanyContactAssociations(company.id);
-        const memberIds = associations
+        const totalMembers = associations.length;
+        const otherMemberIds = associations
           .map(({ toObjectId }) => String(toObjectId))
           .filter((id) => id !== contactId)
           .slice(0, 25);
-        const members = await Promise.all(memberIds.map((id) => client.getContact(id)));
+        const members = await Promise.all(otherMemberIds.map((id) => client.getContact(id)));
         return {
           id: company.id,
           name: company.properties.name || `Household ${company.id}`,
+          totalMembers,
           members: members.map((member) => ({
             id: member.id,
             name:
