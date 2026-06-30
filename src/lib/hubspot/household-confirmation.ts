@@ -41,7 +41,8 @@ export type HouseholdReviewAction =
   | "match_existing_household"
   | "save_new_household"
   | "no_household"
-  | "confirm_household";
+  | "confirm_household"
+  | "delete_household";
 
 export async function processHouseholdReviewAction(
   client: HubSpotClient,
@@ -50,6 +51,22 @@ export async function processHouseholdReviewAction(
   companyId?: string,
 ): Promise<HouseholdStatusResult> {
   const contact = await client.getContact(contactId);
+
+  if (action === "delete_household") {
+    if (!companyId) {
+      return { status: "needs_attention", contactId, reason: "delete_household requires a companyId." };
+    }
+    const company = await client.getCompany(companyId);
+    if (company.properties.record_type !== "household") {
+      return { status: "needs_attention", contactId, reason: "Specified company is not a Household." };
+    }
+    const members = await client.getCompanyContactAssociations(companyId);
+    if (members.length > 0) {
+      return { status: "needs_attention", contactId, reason: "Cannot delete a Household that still has members." };
+    }
+    await client.archiveCompany(companyId);
+    return { status: "review_fields_cleared", contactId, reason: `Household ${companyId} deleted.` };
+  }
 
   if (action === "confirm_household") {
     if (!companyId) {

@@ -14,6 +14,7 @@ const ACTIONS = new Set<HouseholdReviewAction>([
   "save_new_household",
   "no_household",
   "confirm_household",
+  "delete_household",
 ]);
 
 export async function POST(request: Request) {

@@ -83,6 +83,7 @@ export type HubSpotClient = {
   getDealCompanyAssociations(dealId: string): Promise<HubSpotObjectAssociation[]>;
   updateDealProperties(dealId: string, properties: Record<string, string>): Promise<void>;
   archiveDeal(dealId: string): Promise<void>;
+  archiveCompany(companyId: string): Promise<void>;
 };
 
 export class HubSpotApiError extends Error {
@@ -392,6 +393,12 @@ export function createHubSpotClient(input?: {
 
     async archiveDeal(dealId) {
       await request(`/crm/v3/objects/deals/${encodeURIComponent(dealId)}`, {
+        method: "DELETE",
+      });
+    },
+
+    async archiveCompany(companyId) {
+      await request(`/crm/v3/objects/companies/${encodeURIComponent(companyId)}`, {
         method: "DELETE",
       });
     },
