@@ -49,6 +49,28 @@ test("creates a Household for an unhouseholded contact without review fields", a
   assert.ok(calls.some(([name]) => name === "createCompany"));
 });
 
+test("recreates a Household when a stale auto-householded status has no association", async () => {
+  const calls = [];
+  let contactProperties = { lastname: "Youd", household_match_status: "auto_householded" };
+  const client = {
+    async getContact(id) {
+      return { id, properties: contactProperties, associations: { companies: { results: [] }, deals: { results: [] } } };
+    },
+    async createCompany(properties) { calls.push(["createCompany", properties]); return { id: "123456", properties }; },
+    async associateContactToCompany(contactId, companyId) { calls.push(["associateContactToCompany", contactId, companyId]); },
+    async updateContactProperties(contactId, properties) { contactProperties = { ...contactProperties, ...properties }; },
+    async getCompany(id) { return { id, properties: { name: "Youd Household", record_type: "household" } }; },
+    async getDeals() { return []; },
+    async associateDealToCompany() {},
+  };
+
+  assert.equal(
+    (await processHouseholdReviewAction(client, "contact-stale", "save_new_household")).status,
+    "associated",
+  );
+  assert.equal(calls.filter(([name]) => name === "createCompany").length, 1);
+});
+
 test("associates a confirmed contact and only Individual Donations deals", async () => {
   const calls = [];
   const client = {

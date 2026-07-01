@@ -96,8 +96,7 @@ export async function processHouseholdReviewAction(
   }
 
   const status = contact.properties.household_match_status;
-  const canCreateHousehold =
-    action === "save_new_household" && status !== "confirmed" && status !== "auto_householded";
+  const canCreateHousehold = action === "save_new_household";
 
   if (status !== "needs_review" && !canCreateHousehold) {
     return {
@@ -117,6 +116,20 @@ export async function processHouseholdReviewAction(
   }
 
   if (action === "save_new_household") {
+    const associatedCompanies = await Promise.all(
+      uniqueIds(contact.associations?.companies?.results).map((id) => client.getCompany(id)),
+    );
+    const associatedHouseholds = associatedCompanies.filter(
+      (company) => company.properties.record_type === "household",
+    );
+    if (associatedHouseholds.length > 0) {
+      return {
+        status: "needs_attention",
+        contactId,
+        reason: "Contact is already associated with a Household. Refresh the card before creating another.",
+      };
+    }
+
     const lastName = contact.properties.lastname?.trim();
     if (!lastName) {
       return { status: "needs_attention", contactId, reason: "Contact has no last name." };
