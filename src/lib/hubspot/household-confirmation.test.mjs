@@ -5,8 +5,49 @@ import {
   associateGivebutterDealToHousehold,
   confirmContactHousehold,
   parseSuggestedHouseholdCompanyId,
+  processHouseholdReviewAction,
   processHouseholdStatusChange,
 } from "./household-confirmation.ts";
+
+test("creates a Household for an unhouseholded contact without review fields", async () => {
+  const calls = [];
+  let contactProperties = { lastname: "Youd", address: "1 Main St", city: "Chapel Hill", state: "NC", zip: "27514" };
+  const client = {
+    async getContact(id) {
+      return {
+        id,
+        properties: contactProperties,
+        associations: { deals: { results: [] }, companies: { results: [] } },
+      };
+    },
+    async createCompany(properties) {
+      calls.push(["createCompany", properties]);
+      return { id: "123456", properties };
+    },
+    async associateContactToCompany(contactId, companyId) {
+      calls.push(["associateContactToCompany", contactId, companyId]);
+    },
+    async updateContactProperties(contactId, properties) {
+      calls.push(["updateContactProperties", contactId, properties]);
+      contactProperties = { ...contactProperties, ...properties };
+    },
+    async getCompany(id) {
+      return { id, properties: { name: "Youd Household", record_type: "household" } };
+    },
+    async getDeals() { return []; },
+    async associateDealToCompany() {},
+  };
+
+  const result = await processHouseholdReviewAction(client, "contact-new", "save_new_household");
+
+  assert.deepEqual(result, {
+    status: "associated",
+    contactId: "contact-new",
+    companyId: "123456",
+    associatedDealIds: [],
+  });
+  assert.ok(calls.some(([name]) => name === "createCompany"));
+});
 
 test("associates a confirmed contact and only Individual Donations deals", async () => {
   const calls = [];

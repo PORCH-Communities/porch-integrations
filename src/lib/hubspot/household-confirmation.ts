@@ -95,7 +95,11 @@ export async function processHouseholdReviewAction(
     return confirmContactHousehold(client, contactId);
   }
 
-  if (contact.properties.household_match_status !== "needs_review") {
+  const status = contact.properties.household_match_status;
+  const canCreateHousehold =
+    action === "save_new_household" && status !== "confirmed" && status !== "auto_householded";
+
+  if (status !== "needs_review" && !canCreateHousehold) {
     return {
       status: "ignored_not_actionable",
       contactId,
