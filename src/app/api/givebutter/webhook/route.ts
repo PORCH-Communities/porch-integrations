@@ -30,6 +30,7 @@ export async function GET() {
     ok: true,
     endpoint: "/api/givebutter/webhook",
     mode,
+    transactionLogEmailEnabled: Boolean(process.env.RESEND_API_KEY),
     events: ["transaction.succeeded", "refund.created", "campaign.created", "campaign.updated"],
   });
 }
