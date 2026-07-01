@@ -1,0 +1,201 @@
+{
+  "mode": "write",
+  "succeeded": 29,
+  "failed": 0,
+  "byReason": {
+    "duplicate_risk": 16,
+    "no_last_name": 13
+  },
+  "results": [
+    {
+      "ok": true,
+      "contactId": "60296024700",
+      "name": "Laura Baxley",
+      "reason": "duplicate_risk",
+      "householdName": "Baxley Household"
+    },
+    {
+      "ok": true,
+      "contactId": "224343044422",
+      "name": "Laura and Jim Baxley",
+      "reason": "duplicate_risk",
+      "householdName": "Baxley Household"
+    },
+    {
+      "ok": true,
+      "contactId": "84375499403",
+      "name": "Katherine and Sstephen Murphy",
+      "reason": "duplicate_risk",
+      "householdName": "Murphy Household"
+    },
+    {
+      "ok": true,
+      "contactId": "179211661141",
+      "name": "Katherine Murphy",
+      "reason": "duplicate_risk",
+      "householdName": "Murphy Household"
+    },
+    {
+      "ok": true,
+      "contactId": "232400345633",
+      "name": "Katherine Murphy",
+      "reason": "duplicate_risk",
+      "householdName": "Murphy Household"
+    },
+    {
+      "ok": true,
+      "contactId": "188750202887",
+      "name": "Martha Miller",
+      "reason": "duplicate_risk",
+      "householdName": "Miller Household"
+    },
+    {
+      "ok": true,
+      "contactId": "194514699800",
+      "name": "Martha W Miller",
+      "reason": "duplicate_risk",
+      "householdName": "Miller Household"
+    },
+    {
+      "ok": true,
+      "contactId": "211874011759",
+      "name": "Peggy Morgan",
+      "reason": "duplicate_risk",
+      "householdName": "Morgan Household"
+    },
+    {
+      "ok": true,
+      "contactId": "219039640158",
+      "name": "Peggy Morgan",
+      "reason": "duplicate_risk",
+      "householdName": "Morgan Household"
+    },
+    {
+      "ok": true,
+      "contactId": "181067459210",
+      "name": "Barb Bataillon",
+      "reason": "duplicate_risk",
+      "householdName": "Bataillon Household"
+    },
+    {
+      "ok": true,
+      "contactId": "217179160131",
+      "name": "Barb Bataillon",
+      "reason": "duplicate_risk",
+      "householdName": "Bataillon Household"
+    },
+    {
+      "ok": true,
+      "contactId": "217175069545",
+      "name": "Barb Bataillon",
+      "reason": "duplicate_risk",
+      "householdName": "Bataillon Household"
+    },
+    {
+      "ok": true,
+      "contactId": "183732859461",
+      "name": "Michele Rose",
+      "reason": "duplicate_risk",
+      "householdName": "Rose Household"
+    },
+    {
+      "ok": true,
+      "contactId": "231270010465",
+      "name": "Michele Rose",
+      "reason": "duplicate_risk",
+      "householdName": "Rose Household"
+    },
+    {
+      "ok": true,
+      "contactId": "206973570641",
+      "name": "Laura Roe",
+      "reason": "duplicate_risk",
+      "householdName": "Roe Household"
+    },
+    {
+      "ok": true,
+      "contactId": "232399541166",
+      "name": "Laura Roe",
+      "reason": "duplicate_risk",
+      "householdName": "Roe Household"
+    },
+    {
+      "ok": true,
+      "contactId": "181063898022",
+      "name": "(no name)",
+      "reason": "no_last_name"
+    },
+    {
+      "ok": true,
+      "contactId": "182458353451",
+      "name": "(no name)",
+      "reason": "no_last_name"
+    },
+    {
+      "ok": true,
+      "contactId": "189679363245",
+      "name": "(no name)",
+      "reason": "no_last_name"
+    },
+    {
+      "ok": true,
+      "contactId": "189679777053",
+      "name": "(no name)",
+      "reason": "no_last_name"
+    },
+    {
+      "ok": true,
+      "contactId": "192284719530",
+      "name": "(no name)",
+      "reason": "no_last_name"
+    },
+    {
+      "ok": true,
+      "contactId": "191423461289",
+      "name": "(no name)",
+      "reason": "no_last_name"
+    },
+    {
+      "ok": true,
+      "contactId": "192167697819",
+      "name": "(no name)",
+      "reason": "no_last_name"
+    },
+    {
+      "ok": true,
+      "contactId": "194509535397",
+      "name": "(no name)",
+      "reason": "no_last_name"
+    },
+    {
+      "ok": true,
+      "contactId": "219038528926",
+      "name": "(no name)",
+      "reason": "no_last_name"
+    },
+    {
+      "ok": true,
+      "contactId": "207202839937",
+      "name": "(no name)",
+      "reason": "no_last_name"
+    },
+    {
+      "ok": true,
+      "contactId": "199962169966",
+      "name": "(no name)",
+      "reason": "no_last_name"
+    },
+    {
+      "ok": true,
+      "contactId": "228817082708",
+      "name": "(no name)",
+      "reason": "no_last_name"
+    },
+    {
+      "ok": true,
+      "contactId": "207285920400",
+      "name": "(no name)",
+      "reason": "no_last_name"
+    }
+  ]
+}

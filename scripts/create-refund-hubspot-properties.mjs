@@ -1,5 +1,5 @@
 /**
- * One-shot script: creates the five refund metadata properties on HubSpot Deal objects.
+ * One-shot script: creates refund metadata properties on HubSpot Deal objects.
  *
  * Run once per portal before deploying refund reconciliation:
  *   node --env-file=.env scripts/create-refund-hubspot-properties.mjs
@@ -50,6 +50,14 @@ const DEAL_PROPERTIES = [
     groupName: "dealinformation",
     description: "Gross donation amount minus all refunds to date. Written by Vercel on each refund.created event.",
   },
+  {
+    name: "gb_processed_refund_ids",
+    label: "Givebutter Processed Refund IDs",
+    type: "string",
+    fieldType: "textarea",
+    groupName: "dealinformation",
+    description: "Comma-separated Givebutter refund IDs already applied to this deal. Used by Vercel for webhook idempotency.",
+  },
 ];
 
 const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
@@ -59,7 +67,19 @@ if (!token) {
   process.exit(1);
 }
 
-const results = await Promise.all(DEAL_PROPERTIES.map(createProperty));
+const results = [];
+
+for (const property of DEAL_PROPERTIES) {
+  try {
+    results.push(await createProperty(property));
+  } catch (error) {
+    results.push({
+      name: property.name,
+      status: "failed",
+      reason: error instanceof Error ? error.message : "unknown_error",
+    });
+  }
+}
 const created = results.filter((r) => r.status === "created").length;
 const skipped = results.filter((r) => r.status === "skipped").length;
 const failed = results.filter((r) => r.status === "failed").length;
@@ -75,6 +95,7 @@ async function createProperty(property) {
     `${HUBSPOT_API_BASE}/crm/v3/properties/deals`,
     {
       method: "POST",
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",

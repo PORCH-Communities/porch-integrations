@@ -12,6 +12,7 @@ import {
   summarizeGivebutterRefundPayload,
 } from "@/lib/givebutter/refund-payload";
 import { createHubSpotClient, HubSpotApiError } from "@/lib/hubspot/client";
+import { processGivebutterRefund } from "@/lib/hubspot/refund-reconciliation";
 import {
   getDonationParityMode,
   processGivebutterDonation,
@@ -152,24 +153,37 @@ export async function POST(request: Request) {
       summary,
     });
 
-    console.log(
-      JSON.stringify({
+    try {
+      const result = await processGivebutterRefund(createHubSpotClient(), refund);
+
+      console.log(JSON.stringify({
         source: "givebutter-webhook",
         receivedAt,
         event,
         verifiedBy: verification.method,
         summary,
         persistedPayload,
-        note: "payload captured for future reconciliation — no HubSpot changes made",
-      }),
-    );
+        result,
+      }));
 
-    return NextResponse.json({
-      ok: true,
-      receivedAt,
-      event,
-      captured: true,
-    });
+      return NextResponse.json({ ok: true, receivedAt, event, captured: true, status: result.status });
+    } catch (error) {
+      const retryable = error instanceof HubSpotApiError ? error.retryable : true;
+      console.error(JSON.stringify({
+        source: "givebutter-webhook",
+        receivedAt,
+        event,
+        failed: true,
+        retryable,
+        persistedPayload,
+        message: error instanceof Error ? error.message : "Unknown error",
+      }));
+
+      return NextResponse.json(
+        { ok: false, receivedAt, event, error: "Givebutter refund processing failed.", retryable },
+        { status: retryable ? 503 : 500 },
+      );
+    }
   }
 
   if (event === "campaign.created" || event === "campaign.updated") {

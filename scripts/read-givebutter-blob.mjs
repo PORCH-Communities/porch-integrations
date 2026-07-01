@@ -12,8 +12,14 @@ if (!process.env.BLOB_READ_WRITE_TOKEN) {
   process.exit(1);
 }
 
-const blob = await get(target);
-const text = await blob.text();
+const blob = await get(target, { access: "private", useCache: false });
+
+if (!blob || blob.statusCode !== 200 || !blob.stream) {
+  console.error(`Blob not found: ${target}`);
+  process.exit(1);
+}
+
+const text = await new Response(blob.stream).text();
 
 try {
   console.log(JSON.stringify(JSON.parse(text), null, 2));
