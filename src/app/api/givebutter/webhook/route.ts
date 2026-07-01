@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 
 import {
   mapGivebutterCampaign,
@@ -19,6 +19,7 @@ import {
 } from "@/lib/hubspot/donation-parity";
 import { persistPayloadLog } from "@/lib/persisted-payload-log";
 import { verifyGivebutterWebhookSecret } from "@/lib/givebutter/webhook-secret";
+import { sendTransactionLogEmail } from "@/lib/givebutter/transaction-log-email";
 
 export const runtime = "nodejs";
 
@@ -92,6 +93,19 @@ export async function POST(request: Request) {
 
     try {
       const result = await processGivebutterDonation(createHubSpotClient(), donation, mode);
+
+      if (mode === "write") {
+        after(async () => {
+          const emailLog = await sendTransactionLogEmail({ donation, result, receivedAt });
+          console.log(JSON.stringify({
+            source: "givebutter-transaction-log-email",
+            receivedAt,
+            transactionId: result.transactionId,
+            referenceNumber: result.referenceNumber,
+            emailLog,
+          }));
+        });
+      }
 
       console.log(
         JSON.stringify({
