@@ -31,13 +31,13 @@ export const PORCH_DONATION_OWNER_ID =
   process.env.HUBSPOT_OWNER_ID ?? "94752409";
 
 export const CHAPTER_FINANCIAL_DONOR_ASSOCIATION_TYPE_ID = Number(
-  process.env.HUBSPOT_ASSOC_FINANCIAL_DONOR ?? "11",
+  process.env.HUBSPOT_ASSOC_FINANCIAL_DONOR ?? "10",
 );
 export const COMPANY_DONATION_CONTACT_ASSOCIATION_TYPE_ID = Number(
   process.env.HUBSPOT_ASSOC_CHAPTER_LEAD_LOOKUP ?? "3",
 );
 export const CHAPTER_DONATION_CONTACT_ASSOCIATION_TYPE_ID = Number(
-  process.env.HUBSPOT_ASSOC_CHAPTER_DONATION_CONTACT ?? "12",
+  process.env.HUBSPOT_ASSOC_CHAPTER_DONATION_CONTACT ?? "13",
 );
 
 export type DonationParityMode = "shadow" | "write";
